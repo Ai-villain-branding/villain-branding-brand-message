@@ -1,3 +1,5 @@
+# Railway will auto-detect Node.js 20 from package.json engines field
+# We only specify chromium for Playwright
 [phases.setup]
 nixPkgs = ["chromium"]
 
