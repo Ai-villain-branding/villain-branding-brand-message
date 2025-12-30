@@ -449,7 +449,7 @@
                       Found on: <a href="${proof.original_url}" target="_blank" class="text-accent">${new URL(proof.original_url).pathname}</a>
                     </div>
                     <div style="margin-top: 1rem;">
-                      <button class="btn btn-secondary" onclick="reCaptureScreenshot('${proof.message_id || ''}', '${proof.original_url.replace(/'/g, "\\'")}', '${messageContent.replace(/'/g, "\\'")}', event)" style="width: 100%;">
+                      <button class="btn btn-secondary" onclick="reCaptureScreenshot('${proof.message_id || ''}', '${(proof.original_url || '').replace(/'/g, "\\'")}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', event)" style="width: 100%;">
                         RE-CAPTURE
                       </button>
                     </div>
@@ -462,6 +462,17 @@
         async function reCaptureScreenshot(messageId, url, text, screenshotId, event) {
             event.stopPropagation();
             
+            // Validate inputs
+            if (!url || url === '' || url === '#') {
+                alert('Invalid URL. Cannot regenerate screenshot.');
+                return;
+            }
+            
+            if (!text || text === '') {
+                alert('Message text is missing. Cannot regenerate screenshot.');
+                return;
+            }
+            
             const button = event.target;
             const card = button.closest('.proof-card');
             const originalText = button.textContent;
@@ -473,34 +484,37 @@
                 const companyId = window.api.getCompanyId();
                 if (!companyId) {
                     alert('Company ID not found');
+                    button.disabled = false;
+                    button.textContent = originalText;
                     return;
                 }
 
                 // If this is a re-generation of a failed screenshot, delete the old failed record first
-                if (screenshotId) {
+                if (screenshotId && screenshotId !== 'undefined' && screenshotId !== 'null') {
                     try {
                         await window.api.deleteScreenshot(screenshotId);
                     } catch (e) {
-                        // Ignore if deletion fails
+                        console.warn('Could not delete old screenshot record:', e);
+                        // Continue anyway
                     }
                 }
 
                 const result = await window.api.generateScreenshot(companyId, messageId, url, text);
                 
-                if (result.success) {
+                if (result && result.success) {
                     // Reload proofs
                     await init();
                     alert('Screenshot captured successfully!');
                 } else {
                     // Reload to show the new failed attempt
                     await init();
-                    alert('Failed to capture screenshot: ' + (result.error || result.details || 'Unknown error'));
+                    alert('Failed to capture screenshot: ' + (result?.error || result?.details || 'Unknown error'));
                 }
             } catch (error) {
                 console.error('Error capturing screenshot:', error);
                 button.disabled = false;
                 button.textContent = originalText;
-                alert('Failed to capture screenshot. Please try again.');
+                alert('Failed to capture screenshot: ' + (error.message || 'Please try again.'));
             }
         }
 
