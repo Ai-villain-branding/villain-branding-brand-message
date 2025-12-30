@@ -466,7 +466,9 @@
                   ${hasProof ? `
                     <button class="delete-btn" onclick="deleteProof('${proofId}', '${cardId}', event)" title="Delete screenshot">×</button>
                     <button class="edit-btn" onclick="editProof('${proofId}', '${imageUrl}', event)" title="Crop/Edit image">✎</button>
-                  ` : ''}
+                  ` : `
+                    <button class="delete-btn" onclick="deletePlaceholderCard('${cardId}', event)" title="Remove this page">×</button>
+                  `}
                   ${imageUrl ? `
                     <img src="${imageUrl}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${imageUrl}')">
                   ` : `
@@ -611,6 +613,25 @@
             } catch (error) {
                 console.error('Error deleting screenshot:', error);
                 alert('Failed to delete screenshot. Please try again.');
+            }
+        }
+
+        function deletePlaceholderCard(cardId, event) {
+            event.stopPropagation(); // Prevent card click
+            
+            if (!confirm('Are you sure you want to remove this page from the proofs view?')) {
+                return;
+            }
+
+            const card = document.getElementById(cardId);
+            if (card) {
+                // Remove the card with animation
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.9)';
+                card.style.transition = 'all 0.3s ease';
+                setTimeout(() => {
+                    card.remove();
+                }, 300);
             }
         }
 
