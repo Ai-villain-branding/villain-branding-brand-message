@@ -395,15 +395,34 @@ class ScreenshotService {
     }
 
     // Capture screenshot for a single message on a page
-    async captureMessage(url, messageText, messageId) {
-        await this.init();
+    async captureMessage(url, messageText, messageId, retries = 2) {
+        let context = null;
+        let page = null;
 
-        const context = await this.browser.newContext({
-            viewport: { width: this.defaultWidth, height: this.defaultHeight },
-            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        });
+        try {
+            // Initialize browser with retry
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await this.init();
+                    break;
+                } catch (initError) {
+                    if (i === 2) throw initError;
+                    console.warn(`Browser init failed, retrying... (${i + 1}/3)`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    this.browser = null; // Force recreation
+                }
+            }
 
-        const page = await context.newPage();
+            // Create context with timeout
+            context = await this.browser.newContext({
+                viewport: { width: this.defaultWidth, height: this.defaultHeight },
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                timeout: 30000
+            });
+
+            page = await context.newPage({
+                timeout: 30000
+            });
 
         try {
             // Navigate to page with more lenient wait strategy

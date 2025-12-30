@@ -175,7 +175,11 @@ app.post('/api/screenshot', async (req, res) => {
         const result = await screenshotService.captureMessage(url, text, messageId);
 
         if (!result) {
-            throw new Error('Screenshot capture failed - the page may have timed out or the message text was not found on the page');
+            // Return a more informative error instead of throwing
+            return res.status(404).json({ 
+                error: 'Screenshot capture failed',
+                details: `Could not find text "${text}" on page ${url}. The message may not be visible on this page.`
+            });
         }
 
         const imageBuffer = result.buffer;
