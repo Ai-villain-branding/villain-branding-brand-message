@@ -435,9 +435,42 @@ class ScreenshotService {
                 throw new Error(`Could not find text "${messageText}" on page`);
             }
 
-            // Scroll element into view
-            await element.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(500);
+            // Scroll element into view with timeout handling
+            try {
+                // Check if element is visible first
+                const isVisible = await element.isVisible().catch(() => false);
+                if (!isVisible) {
+                    // Try to get bounding box and scroll manually
+                    const box = await element.boundingBox().catch(() => null);
+                    if (box) {
+                        await page.evaluate(({ x, y }) => {
+                            window.scrollTo(x, y - 100);
+                        }, box);
+                        await page.waitForTimeout(500);
+                    } else {
+                        // Element might not be in viewport, try scrollIntoViewIfNeeded with shorter timeout
+                        await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                        await page.waitForTimeout(500);
+                    }
+                } else {
+                    // Element is visible, just ensure it's in view
+                    await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                    await page.waitForTimeout(500);
+                }
+            } catch (scrollError) {
+                // If scroll fails, try manual scroll
+                try {
+                    const box = await element.boundingBox().catch(() => null);
+                    if (box) {
+                        await page.evaluate(({ x, y }) => {
+                            window.scrollTo(x, y - 100);
+                        }, box);
+                        await page.waitForTimeout(500);
+                    }
+                } catch (manualScrollError) {
+                    console.warn('Could not scroll element into view, continuing anyway');
+                }
+            }
 
             // Highlight the element subtly
             await this.highlightElement(element);
