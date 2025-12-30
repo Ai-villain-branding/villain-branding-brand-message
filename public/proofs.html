@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Proofs | Villain Branding</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+    <style>
+        .page-layout {
+            margin-top: 8rem;
+            margin-bottom: 4rem;
+        }
+
+        .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 3rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .proofs-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 2rem;
+        }
+
+        .proof-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .proof-image {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+
+        .proof-image:hover {
+            opacity: 0.9;
+            transform: scale(1.02);
+        }
+
+        .proof-content {
+            padding: 1.5rem;
+        }
+
+        .proof-text {
+            font-family: var(--font-serif);
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .proof-meta {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-family: var(--font-sans);
+        }
+
+        .proof-card {
+            position: relative;
+        }
+
+        .delete-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            z-index: 10;
+            font-size: 1.2rem;
+            opacity: 0;
+        }
+
+        .proof-card:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .delete-btn:hover {
+            background: rgba(220, 38, 38, 0.9);
+            border-color: #dc2626;
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .edit-btn {
+            position: absolute;
+            top: 1rem;
+            right: 4rem;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            z-index: 10;
+            font-size: 1rem;
+            opacity: 0;
+        }
+
+        .proof-card:hover .edit-btn {
+            opacity: 1;
+        }
+
+        .edit-btn:hover {
+            background: rgba(59, 130, 246, 0.9);
+            border-color: #3b82f6;
+            color: white;
+            transform: scale(1.1);
+        }
+
+        /* Cropper Modal */
+        .crop-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        .crop-modal.active {
+            display: flex;
+        }
+
+        .crop-container {
+            width: 90%;
+            max-width: 1200px;
+            max-height: 80vh;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 2rem;
+            position: relative;
+        }
+
+        .crop-image-container {
+            width: 100%;
+            max-height: 60vh;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+        }
+
+        .crop-image-container img {
+            max-width: 100%;
+            max-height: 60vh;
+        }
+
+        .crop-controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: flex-end;
+            align-items: center;
+        }
+
+        .save-button-group {
+            display: flex;
+            align-items: stretch;
+            border-radius: var(--radius-pill);
+            overflow: hidden;
+            border: 1px solid var(--text-primary);
+        }
+
+        .save-button-group select {
+            background: var(--text-primary);
+            color: var(--bg-primary);
+            border: none;
+            border-right: 1px solid rgba(15, 15, 15, 0.2);
+            padding: 0.8rem 1.5rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            letter-spacing: 0.02em;
+            font-family: var(--font-sans);
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%230f0f0f' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            padding-right: 2.5rem;
+        }
+
+        .save-button-group select:hover {
+            background: #e0e0e0;
+        }
+
+        .save-button-group select:focus {
+            outline: none;
+        }
+
+        .save-button-group .btn-primary {
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            border-top-right-radius: var(--radius-pill);
+            border-bottom-right-radius: var(--radius-pill);
+            border-left: none;
+            margin: 0;
+            padding: 0.8rem 2rem;
+        }
+
+        .close-crop-modal {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 1.5rem;
+        }
+
+        .close-crop-modal:hover {
+            background: rgba(220, 38, 38, 0.9);
+            border-color: #dc2626;
+            color: white;
+        }
+
+        /* Lightbox Modal */
+        .lightbox {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 1500;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .lightbox.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .lightbox-content {
+            max-width: 95%;
+            max-height: 95vh;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .lightbox-img {
+            max-width: 100%;
+            max-height: 95vh;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+        }
+
+        .close-lightbox {
+            position: absolute;
+            top: -3rem;
+            right: 0;
+            color: white;
+            font-size: 2.5rem;
+            cursor: pointer;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        .close-lightbox:hover {
+            background: rgba(220, 38, 38, 0.9);
+            transform: scale(1.1);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="container nav-container">
+            <div class="logo" onclick="window.location.href='index.html'" style="cursor: pointer;">
+                VILLAIN <span>BRANDING™</span>
+            </div>
+            <nav class="nav-links">
+                <a href="index.html" class="nav-link">DASHBOARD</a>
+                <a href="#" class="nav-link" id="navMessages">MESSAGES</a>
+                <a href="#" class="nav-link active">PROOFS</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container page-layout">
+        <div class="header-row">
+            <div>
+                <h1 id="companyName">Loading...</h1>
+                <p class="text-muted">Visual Proofs</p>
+            </div>
+            <div>
+                <button class="btn btn-secondary" onclick="window.print()">
+                    EXPORT PDF
+                </button>
+            </div>
+        </div>
+
+        <div id="proofsGrid" class="proofs-grid">
+            <!-- Proofs injected here -->
+            <div class="text-center" style="grid-column: 1/-1; padding: 4rem;">
+                <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                <p class="text-muted">Generating screenshots...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox Modal -->
+    <div id="lightbox" class="lightbox">
+        <div class="lightbox-content">
+            <span class="close-lightbox" onclick="closeLightbox()">&times;</span>
+            <img src="" alt="Full size" class="lightbox-img" id="lightboxImg">
+        </div>
+    </div>
+
+    <!-- Crop Modal -->
+    <div id="cropModal" class="crop-modal">
+        <div class="crop-container">
+            <button class="close-crop-modal" onclick="closeCropModal()">×</button>
+            <h2 style="margin-bottom: 1.5rem; color: var(--text-primary);">Crop Image</h2>
+            <div class="crop-image-container">
+                <img id="cropImage" src="" alt="Image to crop">
+            </div>
+            <div class="crop-controls">
+                <button class="btn btn-secondary" onclick="closeCropModal()">Cancel</button>
+                <div class="save-button-group">
+                    <select id="saveModeSelect">
+                        <option value="copy" selected>Save as Copy</option>
+                        <option value="replace">Replace Original</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="saveCroppedImage()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        // Proofs Page Logic
+        const companyId = window.api.getCompanyId();
+        const companyName = document.getElementById('companyName');
+        const proofsGrid = document.getElementById('proofsGrid');
+
+        // Update Nav Links
+        window.api.updateNavLinks(companyId);
+
+        async function init() {
+            if (!companyId) {
+                window.location.href = 'companies.html';
+                return;
+            }
+
+            try {
+                // Fetch company info (optional, for header)
+                const companies = await window.api.getCompanies();
+                const company = companies.find(c => c.id === companyId);
+                if (company) {
+                    document.getElementById('companyName').textContent = company.name || company.domain;
+                }
+
+                // Fetch screenshots
+                const proofs = await window.api.getScreenshots(companyId);
+                renderProofs(proofs);
+            } catch (error) {
+                console.error('Error loading proofs:', error);
+                document.getElementById('proofsGrid').innerHTML = `<p class="text-center text-error">Failed to load proofs.</p>`;
+            }
+        }
+
+        function renderProofs(proofs) {
+            const container = document.getElementById('proofsGrid');
+
+            if (!proofs || proofs.length === 0) {
+                container.innerHTML = `<p class="text-center text-muted">No proofs generated yet. Go back to Messages to generate some.</p>`;
+                return;
+            }
+
+            container.innerHTML = proofs.map(proof => `
+                <div class="proof-card" id="proof-${proof.id}">
+                  <button class="delete-btn" onclick="deleteProof('${proof.id}', event)" title="Delete screenshot">×</button>
+                  <button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>
+                  <img src="${proof.image_url}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${proof.image_url}')">
+                  <div class="proof-content">
+                    <div class="proof-text">"${proof.message_content}"</div>
+                    <div class="proof-meta">
+                      Found on: <a href="${proof.original_url}" target="_blank" class="text-accent">${new URL(proof.original_url).pathname}</a>
+                    </div>
+                  </div>
+                </div>
+            `).join('');
+        }
+
+        async function deleteProof(screenshotId, event) {
+            event.stopPropagation(); // Prevent image click
+            
+            if (!confirm('Are you sure you want to delete this screenshot? This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                await window.api.deleteScreenshot(screenshotId);
+                
+                // Remove the card from the DOM
+                const card = document.getElementById(`proof-${screenshotId}`);
+                if (card) {
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.9)';
+                    card.style.transition = 'all 0.3s ease';
+                    setTimeout(() => {
+                        card.remove();
+                        // Reload proofs to ensure consistency
+                        init();
+                    }, 300);
+                }
+            } catch (error) {
+                console.error('Error deleting screenshot:', error);
+                alert('Failed to delete screenshot. Please try again.');
+            }
+        }
+
+        // Cropper instance
+        let cropper = null;
+        let currentScreenshotId = null;
+
+        function editProof(screenshotId, imageUrl, event) {
+            event.stopPropagation();
+            currentScreenshotId = screenshotId;
+            
+            const modal = document.getElementById('cropModal');
+            const cropImage = document.getElementById('cropImage');
+            const saveModeSelect = document.getElementById('saveModeSelect');
+            
+            // Reset save mode to default (copy)
+            if (saveModeSelect) {
+                saveModeSelect.value = 'copy';
+            }
+            
+            // Destroy existing cropper if any
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            
+            // Set image source
+            cropImage.src = imageUrl;
+            
+            // Show modal
+            modal.classList.add('active');
+            
+            // Initialize cropper when image loads
+            const initCropper = function() {
+                if (cropper) {
+                    cropper.destroy();
+                }
+                
+                cropper = new Cropper(cropImage, {
+                    aspectRatio: NaN, // Free aspect ratio
+                    viewMode: 1,
+                    dragMode: 'move',
+                    autoCropArea: 0.8,
+                    restore: false,
+                    guides: true,
+                    center: true,
+                    highlight: false,
+                    cropBoxMovable: true,
+                    cropBoxResizable: true,
+                    toggleDragModeOnDblclick: false,
+                    ready: function() {
+                        console.log('Cropper ready');
+                    }
+                });
+            };
+            
+            // Set up load handler
+            cropImage.onload = initCropper;
+            
+            // If image is already loaded
+            if (cropImage.complete && cropImage.naturalWidth > 0) {
+                setTimeout(initCropper, 100);
+            }
+        }
+
+        function closeCropModal() {
+            const modal = document.getElementById('cropModal');
+            modal.classList.remove('active');
+            
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            
+            currentScreenshotId = null;
+        }
+
+        async function saveCroppedImage() {
+            if (!cropper || !currentScreenshotId) {
+                alert('No image selected for cropping');
+                return;
+            }
+
+            try {
+                // Get cropped canvas
+                const canvas = cropper.getCroppedCanvas({
+                    width: cropper.getCroppedCanvas().width,
+                    height: cropper.getCroppedCanvas().height,
+                    imageSmoothingEnabled: true,
+                    imageSmoothingQuality: 'high',
+                });
+
+                // Convert to blob
+                canvas.toBlob(async (blob) => {
+                    if (!blob) {
+                        alert('Failed to create cropped image');
+                        return;
+                    }
+
+                    // Convert blob to base64
+                    const reader = new FileReader();
+                    reader.onerror = () => {
+                        console.error('FileReader error');
+                        alert('Failed to read cropped image. Please try again.');
+                    };
+                    reader.onloadend = async () => {
+                        const base64data = reader.result;
+                        
+                        if (!base64data) {
+                            alert('Failed to convert image to base64. Please try again.');
+                            return;
+                        }
+                        
+                        try {
+                            console.log('Sending cropped image to server...');
+                            
+                            // Check save mode from dropdown
+                            const saveModeSelect = document.getElementById('saveModeSelect');
+                            const saveMode = saveModeSelect ? saveModeSelect.value : 'copy';
+                            
+                            let result;
+                            if (saveMode === 'copy') {
+                                // Save as new copy
+                                console.log('Saving as new copy...');
+                                result = await window.api.copyScreenshot(currentScreenshotId, base64data);
+                                console.log('Copy result:', result);
+                            } else {
+                                // Replace original
+                                console.log('Replacing original image...');
+                                result = await window.api.updateScreenshot(currentScreenshotId, base64data);
+                                console.log('Update result:', result);
+                            }
+                            
+                            // Close modal
+                            closeCropModal();
+                            
+                            // Reload proofs to show updated/new image
+                            await init();
+                            
+                            const successMessage = saveMode === 'copy' 
+                                ? 'Image saved as new copy successfully!' 
+                                : 'Image cropped and saved successfully!';
+                            alert(successMessage);
+                        } catch (error) {
+                            console.error('Error saving cropped image:', error);
+                            console.error('Error details:', error.message, error.stack);
+                            alert(`Failed to save cropped image: ${error.message || 'Unknown error'}. Please check console for details.`);
+                        }
+                    };
+                    reader.readAsDataURL(blob);
+                }, 'image/png', 1.0);
+            } catch (error) {
+                console.error('Error cropping image:', error);
+                alert('Failed to crop image. Please try again.');
+            }
+        }
+
+        // Lightbox functions
+        function openLightbox(imageUrl) {
+            const lightbox = document.getElementById('lightbox');
+            const lightboxImg = document.getElementById('lightboxImg');
+            lightboxImg.src = imageUrl;
+            lightbox.classList.add('active');
+        }
+
+        function closeLightbox() {
+            const lightbox = document.getElementById('lightbox');
+            lightbox.classList.remove('active');
+        }
+
+        // Close lightbox when clicking outside image
+        document.getElementById('lightbox').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget || e.target.classList.contains('lightbox-content')) {
+                closeLightbox();
+            }
+        });
+
+        // Close modals on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeCropModal();
+                closeLightbox();
+            }
+        });
+
+        // Init
+        init();
+    </script>
+</body>
+
+</html>

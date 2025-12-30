@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company Proofs | Villain Branding</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        /* Fixed Heading Container */
+        .fixed-heading-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding-top: 8rem;
+            padding-bottom: 2rem;
+            background-color: var(--bg-primary);
+            z-index: 90;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .fixed-heading {
+            font-size: 3.5rem;
+            text-align: center;
+            margin: 0;
+        }
+
+        /* Scrollable Companies Container */
+        .scrollable-companies-container {
+            margin-top: 15rem;
+            padding-bottom: 4rem;
+        }
+
+        .message-grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .message-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 2rem;
+            transition: var(--transition);
+            position: relative;
+            cursor: pointer;
+        }
+
+        .message-card:hover {
+            border-color: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="container nav-container">
+            <div class="logo" onclick="window.location.href='index.html'" style="cursor: pointer;">
+                VILLAIN <span>BRANDING™</span>
+            </div>
+            <nav class="nav-links">
+                <a href="index.html" class="nav-link">DASHBOARD</a>
+                <a href="companies.html" class="nav-link">MESSAGES</a>
+                <a href="companies-proofs.html" class="nav-link active">PROOFS</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Fixed Heading -->
+    <div class="fixed-heading-container">
+        <h1 class="hero-title fixed-heading">
+            <span>COMPANY</span>
+            <span>PROOFS</span>
+        </h1>
+    </div>
+
+    <!-- Scrollable Companies List -->
+    <div class="container scrollable-companies-container">
+        <div id="companiesGrid" class="message-grid">
+            <div class="feature-item text-center" style="padding: 4rem;">
+                <p class="text-muted">Loading companies...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        const companiesGrid = document.getElementById('companiesGrid');
+
+        async function loadCompanies() {
+            try {
+                const companies = await window.api.getCompaniesWithProofs();
+                renderCompanies(companies);
+            } catch (error) {
+                console.error('Failed to load companies:', error);
+                companiesGrid.innerHTML = `<p class="text-center text-error">Failed to load companies. Is the server running?</p>`;
+            }
+        }
+
+        function renderCompanies(companies) {
+            if (!companies || companies.length === 0) {
+                companiesGrid.innerHTML = `
+          <div class="message-card text-center" style="padding: 4rem;">
+            <p class="text-muted">No companies with proofs yet. Go to Messages to generate proofs for a company.</p>
+          </div>
+        `;
+                return;
+            }
+
+            companiesGrid.innerHTML = companies.map(company => `
+        <div class="message-card" onclick="window.location.href='proofs.html?id=${company.id}'" style="display: flex; justify-content: space-between; align-items: center; padding: 3rem;">
+          <div>
+            <h2 style="font-size: 2.5rem; font-weight: 300; margin-bottom: 0.5rem;">${company.name || company.domain}</h2>
+            <p class="text-muted" style="font-size: 1.1rem;">${company.url}</p>
+          </div>
+          <div class="flex items-center gap-4">
+            <span class="badge badge-primary" style="padding: 0.8rem 1.5rem; font-size: 1rem;">
+              ${company.proof_count} ${company.proof_count === 1 ? 'Proof' : 'Proofs'}
+            </span>
+            <span class="btn btn-secondary">VIEW PROOFS</span>
+          </div>
+        </div>
+      `).join('');
+        }
+
+        loadCompanies();
+    </script>
+</body>
+
+</html>
+
+

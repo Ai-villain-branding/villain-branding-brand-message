@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Company Dashboard | Villain Branding</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="container nav-container">
+      <div class="logo" onclick="window.location.href='index.html'" style="cursor: pointer;">
+        VILLAIN <span>BRANDING™</span>
+      </div>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link active">DASHBOARD</a>
+        <a href="companies.html" class="nav-link">MESSAGES</a>
+        <a href="companies-proofs.html" class="nav-link">PROOFS</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container">
+    <section class="hero-section" style="min-height: 80vh; display: flex; align-items: center;">
+      <div class="hero-grid">
+        <div class="hero-text">
+          <h1 class="hero-title" style="font-size: 5rem;">
+            <span>CLIENT</span>
+            <span>DASHBOARD</span>
+          </h1>
+        </div>
+
+        <div class="hero-content">
+          <h2 class="hero-subtitle">Manage Brand Analyses</h2>
+          <p class="hero-description">
+            Add a new company URL to start the extraction process. Once analyzed, you can review brand messaging and
+            generate visual proofs.
+          </p>
+
+          <div class="analysis-form-container">
+            <form id="addCompanyForm">
+              <div class="input-group">
+                <input type="url" id="companyUrl" class="input" placeholder="Enter company website URL..." required>
+              </div>
+              <button type="submit" class="btn btn-primary" style="width: 100%;" id="addBtn">
+                ADD COMPANY
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script>
+    // Dashboard Logic
+    const addCompanyForm = document.getElementById('addCompanyForm');
+    const addBtn = document.getElementById('addBtn');
+
+    addCompanyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = document.getElementById('companyUrl').value;
+
+      try {
+        addBtn.disabled = true;
+        addBtn.textContent = 'ANALYZING... (This may take a minute)';
+
+        const result = await window.api.analyzeWebsite(url);
+
+        if (result.success) {
+          // Redirect to the newly created company's messages
+          window.location.href = `company.html?id=${result.companyId}`;
+        } else {
+          alert('Analysis failed: ' + (result.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred during analysis. Check console for details.');
+      } finally {
+        addBtn.disabled = false;
+        addBtn.textContent = 'ADD COMPANY';
+      }
+    });
+  </script>
+</body>
+
+</html>

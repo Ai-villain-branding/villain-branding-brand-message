@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyzed Companies | Villain Branding</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .company-card {
+            position: relative;
+        }
+
+        .delete-company-btn {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            z-index: 10;
+            font-size: 1.2rem;
+            opacity: 0;
+        }
+
+        .company-card:hover .delete-company-btn {
+            opacity: 1;
+        }
+
+        .delete-company-btn:hover {
+            background: rgba(220, 38, 38, 0.9);
+            border-color: #dc2626;
+            color: white;
+            transform: scale(1.1);
+        }
+
+        /* Fixed Heading Container */
+        .fixed-heading-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding-top: 8rem;
+            padding-bottom: 2rem;
+            background-color: var(--bg-primary);
+            z-index: 90;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .fixed-heading {
+            font-size: 3.5rem;
+            text-align: center;
+            margin: 0;
+        }
+
+        /* Scrollable Companies Container */
+        .scrollable-companies-container {
+            margin-top: 15rem;
+            padding-bottom: 4rem;
+        }
+
+        .message-grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .message-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 2rem;
+            transition: var(--transition);
+            position: relative;
+            cursor: pointer;
+        }
+
+        .message-card:hover {
+            border-color: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="container nav-container">
+            <div class="logo" onclick="window.location.href='index.html'" style="cursor: pointer;">
+                VILLAIN <span>BRANDING™</span>
+            </div>
+            <nav class="nav-links">
+                <a href="index.html" class="nav-link">DASHBOARD</a>
+                <a href="companies.html" class="nav-link active">MESSAGES</a>
+                <a href="companies-proofs.html" class="nav-link">PROOFS</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Fixed Heading -->
+    <div class="fixed-heading-container">
+        <h1 class="hero-title fixed-heading">
+            <span>ANALYZED</span>
+            <span>COMPANIES</span>
+        </h1>
+    </div>
+
+    <!-- Scrollable Companies List -->
+    <div class="container scrollable-companies-container">
+        <div id="companiesGrid" class="message-grid">
+            <div class="feature-item text-center" style="padding: 4rem;">
+                <p class="text-muted">Loading companies...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        const companiesGrid = document.getElementById('companiesGrid');
+
+        async function loadCompanies() {
+            try {
+                const companies = await window.api.getCompanies();
+                renderCompanies(companies);
+            } catch (error) {
+                console.error('Failed to load companies:', error);
+                companiesGrid.innerHTML = `<p class="text-center text-error">Failed to load companies. Is the server running?</p>`;
+            }
+        }
+
+        function renderCompanies(companies) {
+            if (!companies || companies.length === 0) {
+                companiesGrid.innerHTML = `
+          <div class="message-card text-center" style="padding: 4rem;">
+            <p class="text-muted">No companies analyzed yet. Go to the Dashboard to add one.</p>
+          </div>
+        `;
+                return;
+            }
+
+            companiesGrid.innerHTML = companies.map(company => `
+        <div class="message-card company-card" id="company-${company.id}" onclick="handleCompanyClick(event, '${company.id}')" style="display: flex; justify-content: space-between; align-items: center; padding: 3rem;">
+          <button class="delete-company-btn" onclick="deleteCompany('${company.id}', event)" title="Delete company">×</button>
+          <div>
+            <h2 style="font-size: 2.5rem; font-weight: 300; margin-bottom: 0.5rem;">${company.name || company.domain}</h2>
+            <p class="text-muted" style="font-size: 1.1rem;">${company.url}</p>
+          </div>
+          <div class="flex items-center gap-4">
+            <span class="badge badge-primary" style="padding: 0.8rem 1.5rem; font-size: 1rem;">
+              Analyzed
+            </span>
+            <span class="btn btn-secondary">VIEW MESSAGES</span>
+          </div>
+        </div>
+      `).join('');
+        }
+
+        function handleCompanyClick(event, companyId) {
+            // Don't navigate if delete button was clicked
+            if (event.target.classList.contains('delete-company-btn')) {
+                return;
+            }
+            window.location.href = `company.html?id=${companyId}`;
+        }
+
+        async function deleteCompany(companyId, event) {
+            event.stopPropagation(); // Prevent card click
+            
+            if (!confirm('Are you sure you want to delete this company? This will also delete all associated messages and screenshots. This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                await window.api.deleteCompany(companyId);
+                
+                // Remove the card from the DOM
+                const card = document.getElementById(`company-${companyId}`);
+                if (card) {
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.9)';
+                    card.style.transition = 'all 0.3s ease';
+                    setTimeout(() => {
+                        card.remove();
+                        // Reload companies to ensure consistency
+                        loadCompanies();
+                    }, 300);
+                }
+            } catch (error) {
+                console.error('Error deleting company:', error);
+                alert('Failed to delete company. Please try again.');
+            }
+        }
+
+        loadCompanies();
+    </script>
+</body>
+
+</html>
