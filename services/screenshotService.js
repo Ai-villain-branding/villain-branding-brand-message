@@ -161,7 +161,7 @@ class ScreenshotService {
         // Strategy 1: Custom script to find the smallest element containing the full text
         // This handles case-insensitive matching and finds the most specific element
         try {
-            const handle = await page.evaluateHandle((targetText, normalizedTarget) => {
+            const handle = await page.evaluateHandle(({ targetText, normalizedTarget }) => {
                 const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li, button, label, strong, em, b, i');
                 let bestMatch = null;
                 let minArea = Infinity;
@@ -198,7 +198,7 @@ class ScreenshotService {
                     }
                 }
                 return bestMatch;
-            }, cleanText, normalizedText);
+            }, { targetText: cleanText, normalizedTarget: normalizedText });
 
             if (handle && handle.asElement()) {
                 return handle.asElement();
@@ -209,7 +209,7 @@ class ScreenshotService {
 
         // Strategy 2: Try to find by exact text match (case-insensitive)
         try {
-            const element = await page.evaluateHandle((targetText, normalizedTarget) => {
+            const element = await page.evaluateHandle(({ targetText, normalizedTarget }) => {
                 const walker = document.createTreeWalker(
                     document.body,
                     NodeFilter.SHOW_TEXT,
@@ -236,7 +236,7 @@ class ScreenshotService {
                     }
                 }
                 return null;
-            }, cleanText, normalizedText);
+            }, { targetText: cleanText, normalizedTarget: normalizedText });
             
             if (element && element.asElement()) {
                 return element.asElement();
