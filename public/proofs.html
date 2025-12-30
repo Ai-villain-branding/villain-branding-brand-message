@@ -418,75 +418,39 @@
         function renderAllPages(messages, existingProofs) {
             const container = document.getElementById('proofsGrid');
 
-            if (!messages || messages.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No messages found. Go back to Messages to analyze a company.</p>`;
+            // Only show screenshots that have been generated (existingProofs)
+            if (!existingProofs || existingProofs.length === 0) {
+                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
                 return;
             }
 
-            // Create a map of existing proofs by message_id and url
-            const proofMap = new Map();
-            if (existingProofs) {
-                existingProofs.forEach(proof => {
-                    const key = `${proof.message_id || 'none'}_${proof.original_url || 'none'}`;
-                    proofMap.set(key, proof);
+            // Create a map of messages by ID for content lookup
+            const messagesMap = new Map();
+            if (messages) {
+                messages.forEach(msg => {
+                    messagesMap.set(msg.id, msg);
                 });
             }
 
-            // Collect all unique page URLs from all messages
-            const allPages = [];
-            messages.forEach(msg => {
-                const locations = msg.locations || [];
-                locations.forEach(url => {
-                    const key = `${msg.id}_${url}`;
-                    const existingProof = proofMap.get(key);
-                    allPages.push({
-                        messageId: msg.id,
-                        messageContent: msg.content,
-                        url: url,
-                        existingProof: existingProof
-                    });
-                });
-            });
-
-            if (allPages.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No pages found in messages.</p>`;
-                return;
-            }
-
-            container.innerHTML = allPages.map((page, index) => {
-                const hasProof = !!page.existingProof;
-                const proofId = page.existingProof?.id || null;
-                const imageUrl = page.existingProof?.image_url || null;
-                
-                // Use a stable ID based on message and URL, not proof ID
-                const cardId = `page-${page.messageId}-${index}`;
+            // Only render cards for existing proofs (generated screenshots)
+            container.innerHTML = existingProofs.map((proof, index) => {
+                const message = messagesMap.get(proof.message_id);
+                const messageContent = message?.content || proof.message_content || 'Unknown message';
+                const cardId = `proof-${proof.id}`;
                 
                 return `
-                <div class="proof-card" id="${cardId}" data-proof-id="${proofId || ''}" data-message-id="${page.messageId}" data-url="${page.url.replace(/"/g, '&quot;')}">
-                  ${hasProof ? `
-                    <button class="delete-btn" onclick="deleteProof('${proofId}', '${cardId}', event)" title="Delete screenshot">×</button>
-                    <button class="edit-btn" onclick="editProof('${proofId}', '${imageUrl}', event)" title="Crop/Edit image">✎</button>
-                  ` : `
-                    <button class="delete-btn" onclick="deletePlaceholderCard('${cardId}', event)" title="Remove this page">×</button>
-                  `}
-                  ${imageUrl ? `
-                    <img src="${imageUrl}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${imageUrl}')">
-                  ` : `
-                    <div class="proof-placeholder" style="width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-                      <div style="text-align: center;">
-                        <div style="margin-bottom: 0.5rem;">📷</div>
-                        <div>No screenshot yet</div>
-                      </div>
-                    </div>
-                  `}
+                <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
+                  <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete screenshot">×</button>
+                  <button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>
+                  <img src="${proof.image_url}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${proof.image_url}')">
                   <div class="proof-content">
-                    <div class="proof-text">"${page.messageContent}"</div>
+                    <div class="proof-text">"${messageContent}"</div>
                     <div class="proof-meta">
-                      Found on: <a href="${page.url}" target="_blank" class="text-accent">${new URL(page.url).pathname}</a>
+                      Found on: <a href="${proof.original_url}" target="_blank" class="text-accent">${new URL(proof.original_url).pathname}</a>
                     </div>
                     <div style="margin-top: 1rem;">
-                      <button class="btn btn-secondary" onclick="reCaptureScreenshot('${page.messageId}', '${page.url.replace(/'/g, "\\'")}', '${page.messageContent.replace(/'/g, "\\'")}', event)" style="width: 100%;">
-                        ${hasProof ? 'RE-CAPTURE' : 'CAPTURE SCREENSHOT'}
+                      <button class="btn btn-secondary" onclick="reCaptureScreenshot('${proof.message_id || ''}', '${proof.original_url.replace(/'/g, "\\'")}', '${messageContent.replace(/'/g, "\\'")}', event)" style="width: 100%;">
+                        RE-CAPTURE
                       </button>
                     </div>
                   </div>
@@ -591,20 +555,27 @@
             }
 
             try {
-                await window.api.deleteScreenshot(screenshotId);
-                
-                // Find the card - use cardId if provided, otherwise try to find by proof ID
+                // Find the card first
                 const card = cardId ? document.getElementById(cardId) : document.querySelector(`[data-proof-id="${screenshotId}"]`);
                 
+                // Delete from database
+                await window.api.deleteScreenshot(screenshotId);
+                
                 if (card) {
-                    // Remove the entire card with animation
+                    // Immediately remove the entire card with animation - no placeholder, completely gone
                     card.style.opacity = '0';
                     card.style.transform = 'scale(0.9)';
                     card.style.transition = 'all 0.3s ease';
                     setTimeout(() => {
                         card.remove();
-                        // Reload to ensure consistency
-                        init();
+                        
+                        // Check if there are any cards left
+                        const container = document.getElementById('proofsGrid');
+                        const remainingCards = container.querySelectorAll('.proof-card');
+                        
+                        if (remainingCards.length === 0) {
+                            container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                        }
                     }, 300);
                 } else {
                     // Fallback: reload everything
@@ -613,25 +584,6 @@
             } catch (error) {
                 console.error('Error deleting screenshot:', error);
                 alert('Failed to delete screenshot. Please try again.');
-            }
-        }
-
-        function deletePlaceholderCard(cardId, event) {
-            event.stopPropagation(); // Prevent card click
-            
-            if (!confirm('Are you sure you want to remove this page from the proofs view?')) {
-                return;
-            }
-
-            const card = document.getElementById(cardId);
-            if (card) {
-                // Remove the card with animation
-                card.style.opacity = '0';
-                card.style.transform = 'scale(0.9)';
-                card.style.transition = 'all 0.3s ease';
-                setTimeout(() => {
-                    card.remove();
-                }, 300);
             }
         }
 
