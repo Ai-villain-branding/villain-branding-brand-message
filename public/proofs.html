@@ -458,10 +458,13 @@
                 const proofId = page.existingProof?.id || null;
                 const imageUrl = page.existingProof?.image_url || null;
                 
+                // Use a stable ID based on message and URL, not proof ID
+                const cardId = `page-${page.messageId}-${index}`;
+                
                 return `
-                <div class="proof-card" id="proof-${proofId || `new-${index}`}">
+                <div class="proof-card" id="${cardId}" data-proof-id="${proofId || ''}" data-message-id="${page.messageId}" data-url="${page.url.replace(/"/g, '&quot;')}">
                   ${hasProof ? `
-                    <button class="delete-btn" onclick="deleteProof('${proofId}', event)" title="Delete screenshot">×</button>
+                    <button class="delete-btn" onclick="deleteProof('${proofId}', '${cardId}', event)" title="Delete screenshot">×</button>
                     <button class="edit-btn" onclick="editProof('${proofId}', '${imageUrl}', event)" title="Crop/Edit image">✎</button>
                   ` : ''}
                   ${imageUrl ? `
@@ -544,7 +547,7 @@
             `).join('');
         }
 
-        async function deleteProof(screenshotId, event) {
+        async function deleteProof(screenshotId, cardId, event) {
             event.stopPropagation(); // Prevent image click
             
             if (!confirm('Are you sure you want to delete this screenshot? This action cannot be undone.')) {
@@ -554,17 +557,46 @@
             try {
                 await window.api.deleteScreenshot(screenshotId);
                 
-                // Remove the card from the DOM
-                const card = document.getElementById(`proof-${screenshotId}`);
+                // Find the card - use cardId if provided, otherwise try to find by proof ID
+                const card = cardId ? document.getElementById(cardId) : document.querySelector(`[data-proof-id="${screenshotId}"]`);
+                
                 if (card) {
-                    card.style.opacity = '0';
-                    card.style.transform = 'scale(0.9)';
-                    card.style.transition = 'all 0.3s ease';
+                    // Update the card to show placeholder instead of removing it
+                    const messageId = card.getAttribute('data-message-id');
+                    const url = card.getAttribute('data-url');
+                    
+                    // Remove delete and edit buttons
+                    const deleteBtn = card.querySelector('.delete-btn');
+                    const editBtn = card.querySelector('.edit-btn');
+                    if (deleteBtn) deleteBtn.remove();
+                    if (editBtn) editBtn.remove();
+                    
+                    // Replace image with placeholder
+                    const img = card.querySelector('.proof-image');
+                    if (img) {
+                        const placeholder = document.createElement('div');
+                        placeholder.className = 'proof-placeholder';
+                        placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);';
+                        placeholder.textContent = 'No screenshot yet';
+                        img.replaceWith(placeholder);
+                    }
+                    
+                    // Update button text
+                    const captureBtn = card.querySelector('.btn-secondary');
+                    if (captureBtn) {
+                        captureBtn.textContent = 'CAPTURE SCREENSHOT';
+                    }
+                    
+                    // Clear proof ID from data attribute
+                    card.setAttribute('data-proof-id', '');
+                    
+                    // Reload to ensure consistency
                     setTimeout(() => {
-                        card.remove();
-                        // Reload proofs to ensure consistency
                         init();
-                    }, 300);
+                    }, 100);
+                } else {
+                    // Fallback: reload everything
+                    await init();
                 }
             } catch (error) {
                 console.error('Error deleting screenshot:', error);
