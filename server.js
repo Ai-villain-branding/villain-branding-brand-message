@@ -234,7 +234,8 @@ app.post('/api/screenshot', async (req, res) => {
                 message_id: messageId,
                 image_url: publicUrl,
                 original_url: url,
-                message_content: text
+                message_content: text,
+                status: 'success' // Track status
             })
             .select()
             .single();
