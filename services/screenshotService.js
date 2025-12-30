@@ -12,11 +12,44 @@ class ScreenshotService {
 
     // Initialize browser
     async init() {
-        if (!this.browser) {
+        try {
+            // Check if browser exists and is connected
+            if (this.browser) {
+                try {
+                    // Try to get browser version to check if it's still alive
+                    await this.browser.version();
+                    return; // Browser is alive, no need to recreate
+                } catch (e) {
+                    // Browser is dead, need to recreate
+                    console.warn('Browser connection lost, recreating...');
+                    this.browser = null;
+                }
+            }
+
+            // Launch new browser with resource limits for Railway
             this.browser = await chromium.launch({
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage', // Use /tmp instead of /dev/shm
+                    '--disable-gpu',
+                    '--disable-software-rasterizer',
+                    '--disable-extensions',
+                    '--disable-background-networking',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-features=TranslateUI',
+                    '--disable-ipc-flooding-protection',
+                ],
+                timeout: 30000 // 30 second timeout
             });
+        } catch (error) {
+            console.error('Failed to initialize browser:', error);
+            // Reset browser to null so next attempt will try again
+            this.browser = null;
+            throw error;
         }
     }
 
@@ -524,9 +557,35 @@ class ScreenshotService {
 
         } catch (error) {
             console.error(`Error capturing screenshot for "${messageText}" at ${url}:`, error.message);
+            
+            // If browser crashed, reset it and retry once
+            if ((error.message.includes('Target page, context or browser has been closed') ||
+                 error.message.includes('browser has been closed') ||
+                 error.message.includes('Browser closed')) && retries > 0) {
+                console.warn('Browser crashed, resetting and retrying...');
+                this.browser = null; // Force browser recreation
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait before retry
+                return this.captureMessage(url, messageText, messageId, retries - 1);
+            }
+            
+            // If text not found, return null instead of throwing (allows graceful handling)
+            if (error.message.includes('Could not find text')) {
+                return null;
+            }
+            
             return null;
         } finally {
-            await context.close();
+            // Always cleanup page and context
+            try {
+                if (page) await page.close().catch(() => {});
+            } catch (e) {
+                console.warn('Error closing page:', e.message);
+            }
+            try {
+                if (context) await context.close().catch(() => {});
+            } catch (e) {
+                console.warn('Error closing context:', e.message);
+            }
         }
     }
 
