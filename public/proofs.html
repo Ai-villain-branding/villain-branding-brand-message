@@ -459,7 +459,7 @@
             }).join('');
         }
 
-        async function reCaptureScreenshot(messageId, url, text, event) {
+        async function reCaptureScreenshot(messageId, url, text, screenshotId, event) {
             event.stopPropagation();
             
             const button = event.target;
@@ -476,6 +476,15 @@
                     return;
                 }
 
+                // If this is a re-generation of a failed screenshot, delete the old failed record first
+                if (screenshotId) {
+                    try {
+                        await window.api.deleteScreenshot(screenshotId);
+                    } catch (e) {
+                        // Ignore if deletion fails
+                    }
+                }
+
                 const result = await window.api.generateScreenshot(companyId, messageId, url, text);
                 
                 if (result.success) {
@@ -483,40 +492,14 @@
                     await init();
                     alert('Screenshot captured successfully!');
                 } else {
-                    // Show failure state on the card
-                    if (card) {
-                        // Update placeholder to show failure
-                        const placeholder = card.querySelector('.proof-placeholder');
-                        if (placeholder) {
-                            placeholder.innerHTML = `
-                                <div style="text-align: center;">
-                                    <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
-                                    <div style="color: var(--text-muted); font-size: 0.9rem;">${result.error || 'Unknown error'}</div>
-                                </div>
-                            `;
-                        }
-                    }
-                    button.disabled = false;
-                    button.textContent = 'RETRY CAPTURE';
-                    alert('Failed to capture screenshot: ' + (result.error || 'Unknown error'));
+                    // Reload to show the new failed attempt
+                    await init();
+                    alert('Failed to capture screenshot: ' + (result.error || result.details || 'Unknown error'));
                 }
             } catch (error) {
                 console.error('Error capturing screenshot:', error);
-                
-                // Show failure state on the card
-                if (card) {
-                    const placeholder = card.querySelector('.proof-placeholder');
-                    if (placeholder) {
-                        placeholder.innerHTML = `
-                            <div style="text-align: center;">
-                                <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
-                                <div style="color: var(--text-muted); font-size: 0.9rem;">${error.message || 'Unknown error'}</div>
-                            </div>
-                        `;
-                    }
-                }
                 button.disabled = false;
-                button.textContent = 'RETRY CAPTURE';
+                button.textContent = originalText;
                 alert('Failed to capture screenshot. Please try again.');
             }
         }

@@ -27,9 +27,10 @@ CREATE TABLE IF NOT EXISTS screenshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
   message_id UUID REFERENCES brand_messages(id) ON DELETE SET NULL,
-  image_url TEXT NOT NULL,
+  image_url TEXT, -- Can be NULL for failed attempts
   original_url TEXT, -- The page URL where screenshot was taken
   message_content TEXT, -- The text that was highlighted/captured
+  status TEXT DEFAULT 'success', -- 'success' or 'failed'
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

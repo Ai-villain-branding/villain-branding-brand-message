@@ -175,10 +175,26 @@ app.post('/api/screenshot', async (req, res) => {
         const result = await screenshotService.captureMessage(url, text, messageId);
 
         if (!result) {
-            // Return a more informative error instead of throwing
+            // Store failed attempt in database so it shows up in proofs page
+            const { data: failedScreenshot, error: insertError } = await supabase
+                .from('screenshots')
+                .insert({
+                    company_id: companyId,
+                    message_id: messageId,
+                    image_url: null, // null indicates failed
+                    original_url: url,
+                    message_content: text,
+                    status: 'failed' // Track status
+                })
+                .select()
+                .single();
+            
+            // Return error but also return the failed record so frontend can show placeholder
             return res.status(404).json({ 
+                success: false,
                 error: 'Screenshot capture failed',
-                details: `Could not find text "${text}" on page ${url}. The message may not be visible on this page.`
+                details: `Could not find text "${text}" on page ${url}. The message may not be visible on this page.`,
+                screenshot: failedScreenshot // Return the failed record
             });
         }
 
@@ -233,7 +249,7 @@ app.post('/api/screenshot', async (req, res) => {
     }
 });
 
-// 5. Get Screenshots (for Proofs Gallery)
+// 5. Get Screenshots (for Proofs Gallery) - includes both successful and failed attempts
 app.get('/api/company/:id/screenshots', async (req, res) => {
     const { id } = req.params;
     try {
@@ -244,7 +260,7 @@ app.get('/api/company/:id/screenshots', async (req, res) => {
             .order('created_at', { ascending: false });
 
         if (error) throw error;
-        res.json(data);
+        res.json(data || []);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch screenshots' });
     }
