@@ -603,9 +603,15 @@
                     urlsToScreenshot.forEach(url => {
                         promises.push(
                             window.api.generateScreenshot(companyId, msgId, url, msg.content)
+                                .then(result => {
+                                    // API returns success: false for failed attempts
+                                    // This allows us to track failed attempts
+                                    return result;
+                                })
                                 .catch(err => {
                                     console.error(`Failed to generate screenshot for ${url}:`, err);
-                                    return null; // Continue with other screenshots
+                                    // Return error object so we can count it
+                                    return { success: false, error: err.message };
                                 })
                         );
                     });
@@ -613,12 +619,15 @@
 
                 // Wait for all screenshots to complete
                 const results = await Promise.all(promises);
-                const successCount = results.filter(r => r !== null).length;
+                const successCount = results.filter(r => r && r.success === true).length;
+                const totalCount = results.length;
                 
-                if (successCount === 0) {
-                    alert('Failed to generate any screenshots. Please check the console for errors.');
-                } else if (successCount < promises.length) {
-                    alert(`Generated ${successCount} out of ${promises.length} screenshots. Some may have failed.`);
+                if (successCount === 0 && totalCount > 0) {
+                    alert(`All ${totalCount} screenshot generation attempts failed. Failed attempts are saved and can be re-generated from the Proofs page.`);
+                } else if (successCount < totalCount) {
+                    alert(`Generated ${successCount} out of ${totalCount} screenshots. Failed attempts are saved and can be re-generated from the Proofs page.`);
+                } else if (successCount > 0) {
+                    alert(`Successfully generated ${successCount} screenshot(s)!`);
                 }
 
                 // Navigate to proofs page
