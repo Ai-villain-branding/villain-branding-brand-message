@@ -8,10 +8,14 @@ const { v4: uuidv4 } = require('uuid');
 /**
  * Orchestrates the full analysis workflow for a company
  * @param {string} companyUrl - The URL of the company to analyze
+ * @param {Array<string>} specificPages - Optional array of specific pages to analyze (if provided, only these pages will be analyzed)
  * @returns {Promise<Object>} - The analysis result
  */
-async function runAnalysisWorkflow(companyUrl) {
+async function runAnalysisWorkflow(companyUrl, specificPages = null) {
     console.log(`Starting analysis for: ${companyUrl}`);
+    if (specificPages) {
+        console.log(`Specific pages mode: Analyzing ${specificPages.length} pages`);
+    }
 
     try {
         // 1. Create or Get Company in Supabase
@@ -38,32 +42,36 @@ async function runAnalysisWorkflow(companyUrl) {
             console.log(`Created new company ID: ${companyId}`);
         }
 
-        // 2. Fetch Homepage and Analyze Links
-        console.log('Fetching homepage for link analysis...');
-        const homepageHtml = await fetchHtml(companyUrl);
+        // 2. Determine Pages to Visit
+        let uniquePages;
+        
+        if (specificPages && specificPages.length > 0) {
+            // Mode: Specific pages only - use the provided pages
+            console.log('Using specific pages provided by user');
+            uniquePages = [...new Set(specificPages)]; // Remove duplicates
+            console.log(`Analyzing ${uniquePages.length} specific pages:`, uniquePages);
+        } else {
+            // Mode: Full website scraping - discover pages automatically
+            console.log('Fetching homepage for link analysis...');
+            const homepageHtml = await fetchHtml(companyUrl);
 
-        // Extract links (simple regex for now, or use cheerio if needed, but linkAnalyzer expects raw HTML or list?)
-        // linkAnalyzer.js expects raw HTML to extract links using GPT? No, let's check linkAnalyzer.js
-        // It seems linkAnalyzer.js uses GPT to extract and categorize.
-        // Wait, linkAnalyzer.js implementation:
-        // It takes `htmlContent` and `baseUrl`.
+            console.log('Analyzing links...');
+            const linkAnalysisResult = await analyzeLinks(homepageHtml, companyUrl);
+            console.log('Link Analysis Result:', JSON.stringify(linkAnalysisResult, null, 2));
 
-        console.log('Analyzing links...');
-        const linkAnalysisResult = await analyzeLinks(homepageHtml, companyUrl);
-        console.log('Link Analysis Result:', JSON.stringify(linkAnalysisResult, null, 2));
+            // Determine Pages to Visit (Analyze all pages)
+            const pagesToVisit = new Set([companyUrl]); // Always include homepage
 
-        // 3. Determine Pages to Visit (Analyze all pages)
-        const pagesToVisit = new Set([companyUrl]); // Always include homepage
+            // Add all pages from link analysis
+            if (linkAnalysisResult.homepage) linkAnalysisResult.homepage.forEach(url => pagesToVisit.add(url));
+            if (linkAnalysisResult.about_pages) linkAnalysisResult.about_pages.forEach(url => pagesToVisit.add(url));
+            if (linkAnalysisResult.product_pages) linkAnalysisResult.product_pages.forEach(url => pagesToVisit.add(url));
+            if (linkAnalysisResult.insights_pages) linkAnalysisResult.insights_pages.forEach(url => pagesToVisit.add(url));
+            if (linkAnalysisResult.careers_pages) linkAnalysisResult.careers_pages.forEach(url => pagesToVisit.add(url));
 
-        // Add all pages from link analysis
-        if (linkAnalysisResult.homepage) linkAnalysisResult.homepage.forEach(url => pagesToVisit.add(url));
-        if (linkAnalysisResult.about_pages) linkAnalysisResult.about_pages.forEach(url => pagesToVisit.add(url));
-        if (linkAnalysisResult.product_pages) linkAnalysisResult.product_pages.forEach(url => pagesToVisit.add(url));
-        if (linkAnalysisResult.insights_pages) linkAnalysisResult.insights_pages.forEach(url => pagesToVisit.add(url));
-        if (linkAnalysisResult.careers_pages) linkAnalysisResult.careers_pages.forEach(url => pagesToVisit.add(url));
-
-        const uniquePages = Array.from(pagesToVisit);
-        console.log(`Identified ${uniquePages.length} pages to visit:`, uniquePages);
+            uniquePages = Array.from(pagesToVisit);
+            console.log(`Identified ${uniquePages.length} pages to visit:`, uniquePages);
+        }
 
         // 4. Process Each Page
         let allMessages = [];

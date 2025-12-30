@@ -20,10 +20,16 @@ async function apiRequest(endpoint, options = {}) {
 
 // Export for use in other scripts
 window.api = {
-    // 1. Start Analysis
+    // 1. Start Analysis (Full Website)
     analyzeWebsite: (url) => apiRequest('/api/analyze', {
         method: 'POST',
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url, mode: 'full' })
+    }),
+
+    // 1b. Start Analysis (Specific Pages)
+    analyzeSpecificPages: (baseUrl, pages) => apiRequest('/api/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ url: baseUrl, pages: pages, mode: 'specific' })
     }),
 
     // 2. Get Companies

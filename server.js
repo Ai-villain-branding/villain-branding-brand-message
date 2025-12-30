@@ -41,24 +41,33 @@ app.use(express.static('public'));
 
 // 1. Start Analysis
 app.post('/api/analyze', async (req, res) => {
-    const { url } = req.body;
+    const { url, pages, mode } = req.body;
 
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
+    // Validate input
+    if (mode === 'specific') {
+        // For specific pages mode, we need pages array
+        if (!pages || !Array.isArray(pages) || pages.length === 0) {
+            return res.status(400).json({ error: 'At least one page URL is required for specific pages mode' });
+        }
+        // Use first page's origin as base URL if url not provided
+        if (!url && pages.length > 0) {
+            try {
+                const firstPageUrl = new URL(pages[0]);
+                req.body.url = firstPageUrl.origin;
+            } catch (e) {
+                return res.status(400).json({ error: 'Invalid page URL format' });
+            }
+        }
+    } else {
+        // For full website mode, we need base URL
+        if (!url) {
+            return res.status(400).json({ error: 'URL is required' });
+        }
     }
 
     try {
-        // Run the workflow asynchronously (or synchronously if we want to wait)
-        // For better UX, we might want to return immediately and let frontend poll,
-        // but for simplicity and since the user wants to see progress, we can await it 
-        // or use Server Sent Events (SSE).
-        // Given the previous implementation used polling, let's stick to a simple await for now
-        // or return a jobId.
-        // The previous implementation returned a jobId.
-        // Let's just await it for this MVP version to ensure data is ready when we redirect.
-        // Or better: return success and the companyId.
-
-        const result = await runAnalysisWorkflow(url);
+        // Run the workflow with mode and pages if provided
+        const result = await runAnalysisWorkflow(url, mode === 'specific' ? pages : null);
         res.json({ success: true, companyId: result.companyId });
 
     } catch (error) {
