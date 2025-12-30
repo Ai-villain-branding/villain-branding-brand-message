@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS companies (
   url TEXT NOT NULL UNIQUE,
   domain TEXT NOT NULL,
   name TEXT,
+  analysis_mode TEXT DEFAULT 'full_website', -- 'full_website' or 'specific_pages'
+  pages_analyzed INTEGER, -- Number of pages analyzed (null for full website, count for specific pages)
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

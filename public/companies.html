@@ -146,12 +146,22 @@
                 return;
             }
 
-            companiesGrid.innerHTML = companies.map(company => `
+            companiesGrid.innerHTML = companies.map(company => {
+              const analysisMode = company.analysis_mode || 'full_website';
+              const pagesCount = company.pages_analyzed;
+              const isFullWebsite = analysisMode === 'full_website';
+              const modeLabel = isFullWebsite ? 'Full Website' : `${pagesCount || 'N'} Page${pagesCount !== 1 ? 's' : ''}`;
+              const modeBadgeClass = isFullWebsite ? 'badge-primary' : 'badge-secondary';
+              
+              return `
         <div class="message-card company-card" id="company-${company.id}" onclick="handleCompanyClick(event, '${company.id}')" style="display: flex; justify-content: space-between; align-items: center; padding: 3rem;">
           <button class="delete-company-btn" onclick="deleteCompany('${company.id}', event)" title="Delete company">×</button>
-          <div>
+          <div style="flex: 1;">
             <h2 style="font-size: 2.5rem; font-weight: 300; margin-bottom: 0.5rem;">${company.name || company.domain}</h2>
-            <p class="text-muted" style="font-size: 1.1rem;">${company.url}</p>
+            <p class="text-muted" style="font-size: 1.1rem; margin-bottom: 0.5rem;">${company.url}</p>
+            <span class="badge ${modeBadgeClass}" style="padding: 0.4rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">
+              ${modeLabel}
+            </span>
           </div>
           <div class="flex items-center gap-4">
             <span class="badge badge-primary" style="padding: 0.8rem 1.5rem; font-size: 1rem;">
@@ -160,7 +170,8 @@
             <span class="btn btn-secondary">VIEW MESSAGES</span>
           </div>
         </div>
-      `).join('');
+      `;
+            }).join('');
         }
 
         function handleCompanyClick(event, companyId) {

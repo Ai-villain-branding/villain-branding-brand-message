@@ -26,14 +26,32 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             .eq('url', companyUrl)
             .single();
 
+        // Determine analysis mode
+        const analysisMode = specificPages && specificPages.length > 0 ? 'specific_pages' : 'full_website';
+        const pagesCount = specificPages ? specificPages.length : null;
+
         if (existingCompany) {
             companyId = existingCompany.id;
             console.log(`Found existing company ID: ${companyId}`);
+            // Update analysis mode if it changed
+            await supabase
+                .from('companies')
+                .update({ 
+                    analysis_mode: analysisMode,
+                    pages_analyzed: pagesCount
+                })
+                .eq('id', companyId);
         } else {
             const domain = new URL(companyUrl).hostname;
             const { data: newCompany, error: createError } = await supabase
                 .from('companies')
-                .insert({ url: companyUrl, domain: domain, name: domain })
+                .insert({ 
+                    url: companyUrl, 
+                    domain: domain, 
+                    name: domain,
+                    analysis_mode: analysisMode,
+                    pages_analyzed: pagesCount
+                })
                 .select()
                 .single();
 
