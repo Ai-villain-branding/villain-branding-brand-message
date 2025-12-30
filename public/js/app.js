@@ -10,12 +10,20 @@ async function apiRequest(endpoint, options = {}) {
         }
     });
 
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Request failed' }));
-        throw new Error(error.error || `HTTP ${response.status}`);
+    const data = await response.json().catch(() => ({ error: 'Request failed' }));
+    
+    // For screenshot generation, we want to return the response even if it's a 404
+    // because failed attempts are now tracked in the database
+    if (!response.ok && endpoint.includes('/api/screenshot') && response.status === 404) {
+        // Return the error response as a result object
+        return { success: false, ...data };
     }
 
-    return response.json();
+    if (!response.ok) {
+        throw new Error(data.error || data.details || `HTTP ${response.status}`);
+    }
+
+    return data;
 }
 
 // Export for use in other scripts
