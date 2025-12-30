@@ -255,6 +255,168 @@ class ScreenshotService {
         return finalBox;
     }
 
+    // Close popups, modals, cookie banners, and overlays
+    async closePopups(page) {
+        try {
+            // Wait a bit for popups to appear
+            await page.waitForTimeout(1000);
+
+            // Common selectors for popups, modals, and overlays
+            const popupSelectors = [
+                // Cookie consent banners
+                '[id*="cookie" i]',
+                '[class*="cookie" i]',
+                '[data-testid*="cookie" i]',
+                // Modals and overlays
+                '[role="dialog"]',
+                '.modal',
+                '.overlay',
+                '[class*="modal" i]',
+                '[class*="overlay" i]',
+                '[class*="popup" i]',
+                '[id*="modal" i]',
+                '[id*="overlay" i]',
+                '[id*="popup" i]',
+                // GDPR/Privacy banners
+                '[id*="gdpr" i]',
+                '[class*="gdpr" i]',
+                '[id*="privacy" i]',
+                '[class*="privacy" i]',
+                '[id*="consent" i]',
+                '[class*="consent" i]',
+                // Newsletter popups
+                '[id*="newsletter" i]',
+                '[class*="newsletter" i]'
+            ];
+
+            // Try to find and close popups by selector
+            for (const selector of popupSelectors) {
+                try {
+                    const elements = await page.$$(selector);
+                    for (const element of elements) {
+                        try {
+                            const isVisible = await element.isVisible();
+                            if (!isVisible) continue;
+
+                            // Look for close/accept buttons within the popup
+                            const closeBtn = await element.$('button[aria-label*="close" i], button[aria-label*="Close" i], .close, [class*="close" i], button:has-text("Accept"), button:has-text("×"), button:has-text("X")');
+                            
+                            if (closeBtn) {
+                                await closeBtn.click();
+                                await page.waitForTimeout(500);
+                                continue;
+                            }
+
+                            // If it's a button itself, check if it should be clicked
+                            const tagName = await element.evaluate(el => el.tagName);
+                            if (tagName === 'BUTTON') {
+                                const text = await element.textContent();
+                                const textLower = (text || '').toLowerCase();
+                                if (textLower.includes('accept') || textLower.includes('close') || textLower.includes('agree')) {
+                                    await element.click();
+                                    await page.waitForTimeout(500);
+                                }
+                            }
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                } catch (e) {
+                    continue;
+                }
+            }
+
+            // Try to find and click common cookie accept buttons by text content
+            try {
+                const allButtons = await page.$$('button');
+                for (const button of allButtons) {
+                    try {
+                        const text = await button.textContent();
+                        const textLower = (text || '').toLowerCase().trim();
+                        const isVisible = await button.isVisible();
+                        
+                        if (isVisible && (
+                            textLower.includes('accept all cookies') ||
+                            textLower.includes('accept all') ||
+                            textLower === 'accept' ||
+                            textLower.includes('i accept') ||
+                            textLower.includes('agree') ||
+                            textLower.includes('got it') ||
+                            textLower.includes('ok') ||
+                            textLower.includes('close')
+                        )) {
+                            // Check if button is in a popup/modal context
+                            const parent = await button.evaluateHandle(el => {
+                                let current = el.parentElement;
+                                let depth = 0;
+                                while (current && depth < 5) {
+                                    const id = (current.id || '').toLowerCase();
+                                    const className = (current.className || '').toLowerCase();
+                                    if (id.includes('cookie') || id.includes('modal') || id.includes('popup') ||
+                                        className.includes('cookie') || className.includes('modal') || className.includes('popup') ||
+                                        className.includes('overlay') || className.includes('banner')) {
+                                        return true;
+                                    }
+                                    current = current.parentElement;
+                                    depth++;
+                                }
+                                return false;
+                            });
+                            
+                            if (await parent.jsonValue()) {
+                                await button.click();
+                                await page.waitForTimeout(500);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+            } catch (e) {
+                // Ignore errors
+            }
+
+            // Try clicking common close button patterns
+            try {
+                const closeSelectors = [
+                    'button[aria-label*="close" i]',
+                    'button[aria-label*="Close" i]',
+                    'button.close',
+                    '[class*="close-button" i]',
+                    '[class*="close-btn" i]',
+                    'button:has-text("×")',
+                    'button:has-text("X")'
+                ];
+
+                for (const selector of closeSelectors) {
+                    try {
+                        const closeBtn = await page.$(selector);
+                        if (closeBtn) {
+                            const isVisible = await closeBtn.isVisible();
+                            if (isVisible) {
+                                await closeBtn.click();
+                                await page.waitForTimeout(500);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+            } catch (e) {
+                // Ignore errors
+            }
+
+            // Wait a bit after closing popups for any animations
+            await page.waitForTimeout(1000);
+
+        } catch (error) {
+            // If popup closing fails, continue anyway - don't block screenshot
+            console.warn('Error closing popups:', error.message);
+        }
+    }
+
     // Highlight element for better visibility in screenshot
     async highlightElement(element) {
         try {
@@ -299,6 +461,9 @@ class ScreenshotService {
 
             // Wait a bit for any animations and dynamic content
             await page.waitForTimeout(2000);
+
+            // Close any popups, modals, or overlays before taking screenshot
+            await this.closePopups(page);
 
             // Find element containing the message
             const element = await this.findElementWithText(page, messageText);
