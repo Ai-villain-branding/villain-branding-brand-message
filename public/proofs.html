@@ -471,7 +471,10 @@
                     <img src="${imageUrl}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${imageUrl}')">
                   ` : `
                     <div class="proof-placeholder" style="width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-                      No screenshot yet
+                      <div style="text-align: center;">
+                        <div style="margin-bottom: 0.5rem;">📷</div>
+                        <div>No screenshot yet</div>
+                      </div>
                     </div>
                   `}
                   <div class="proof-content">
@@ -494,6 +497,7 @@
             event.stopPropagation();
             
             const button = event.target;
+            const card = button.closest('.proof-card');
             const originalText = button.textContent;
             button.disabled = true;
             button.textContent = 'CAPTURING...';
@@ -513,14 +517,41 @@
                     await init();
                     alert('Screenshot captured successfully!');
                 } else {
+                    // Show failure state on the card
+                    if (card) {
+                        // Update placeholder to show failure
+                        const placeholder = card.querySelector('.proof-placeholder');
+                        if (placeholder) {
+                            placeholder.innerHTML = `
+                                <div style="text-align: center;">
+                                    <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
+                                    <div style="color: var(--text-muted); font-size: 0.9rem;">${result.error || 'Unknown error'}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    button.disabled = false;
+                    button.textContent = 'RETRY CAPTURE';
                     alert('Failed to capture screenshot: ' + (result.error || 'Unknown error'));
                 }
             } catch (error) {
                 console.error('Error capturing screenshot:', error);
-                alert('Failed to capture screenshot. Please try again.');
-            } finally {
+                
+                // Show failure state on the card
+                if (card) {
+                    const placeholder = card.querySelector('.proof-placeholder');
+                    if (placeholder) {
+                        placeholder.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
+                                <div style="color: var(--text-muted); font-size: 0.9rem;">${error.message || 'Unknown error'}</div>
+                            </div>
+                        `;
+                    }
+                }
                 button.disabled = false;
-                button.textContent = originalText;
+                button.textContent = 'RETRY CAPTURE';
+                alert('Failed to capture screenshot. Please try again.');
             }
         }
 
@@ -564,39 +595,15 @@
                 const card = cardId ? document.getElementById(cardId) : document.querySelector(`[data-proof-id="${screenshotId}"]`);
                 
                 if (card) {
-                    // Update the card to show placeholder instead of removing it
-                    const messageId = card.getAttribute('data-message-id');
-                    const url = card.getAttribute('data-url');
-                    
-                    // Remove delete and edit buttons
-                    const deleteBtn = card.querySelector('.delete-btn');
-                    const editBtn = card.querySelector('.edit-btn');
-                    if (deleteBtn) deleteBtn.remove();
-                    if (editBtn) editBtn.remove();
-                    
-                    // Replace image with placeholder
-                    const img = card.querySelector('.proof-image');
-                    if (img) {
-                        const placeholder = document.createElement('div');
-                        placeholder.className = 'proof-placeholder';
-                        placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);';
-                        placeholder.textContent = 'No screenshot yet';
-                        img.replaceWith(placeholder);
-                    }
-                    
-                    // Update button text
-                    const captureBtn = card.querySelector('.btn-secondary');
-                    if (captureBtn) {
-                        captureBtn.textContent = 'CAPTURE SCREENSHOT';
-                    }
-                    
-                    // Clear proof ID from data attribute
-                    card.setAttribute('data-proof-id', '');
-                    
-                    // Reload to ensure consistency
+                    // Remove the entire card with animation
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.9)';
+                    card.style.transition = 'all 0.3s ease';
                     setTimeout(() => {
+                        card.remove();
+                        // Reload to ensure consistency
                         init();
-                    }, 100);
+                    }, 300);
                 } else {
                     // Fallback: reload everything
                     await init();
