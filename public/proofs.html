@@ -532,9 +532,11 @@
                 return;
             }
 
-            container.innerHTML = proofs.map(proof => `
-                <div class="proof-card" id="proof-${proof.id}">
-                  <button class="delete-btn" onclick="deleteProof('${proof.id}', event)" title="Delete screenshot">×</button>
+            container.innerHTML = proofs.map((proof, index) => {
+                const cardId = `proof-${proof.id}`;
+                return `
+                <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
+                  <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete screenshot">×</button>
                   <button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>
                   <img src="${proof.image_url}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${proof.image_url}')">
                   <div class="proof-content">
@@ -544,7 +546,8 @@
                     </div>
                   </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
         async function deleteProof(screenshotId, cardId, event) {
