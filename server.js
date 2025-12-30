@@ -1,3 +1,26 @@
+// Polyfill for File API if not available (Node.js < 20)
+if (typeof File === 'undefined' && typeof global !== 'undefined') {
+    global.File = class File {
+        constructor(blobParts, name, options = {}) {
+            this.name = name;
+            this.lastModified = options.lastModified || Date.now();
+            this.size = blobParts.reduce((acc, part) => acc + (part.length || part.size || 0), 0);
+            this.type = options.type || '';
+            this._blobParts = blobParts;
+        }
+        stream() {
+            return new ReadableStream({
+                start(controller) {
+                    for (const part of this._blobParts) {
+                        controller.enqueue(part);
+                    }
+                    controller.close();
+                }
+            });
+        }
+    };
+}
+
 const express = require('express');
 const cors = require('cors');
 const { runAnalysisWorkflow } = require('./services/workflow');
