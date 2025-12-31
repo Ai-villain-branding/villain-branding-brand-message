@@ -292,6 +292,82 @@
         .mt-2 {
             margin-top: 0.5rem;
         }
+
+        /* Message Group Styles */
+        .message-group {
+            margin-bottom: 2rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            background: var(--bg-secondary);
+        }
+
+        .message-group-header {
+            padding: 1.5rem 2rem;
+            background: rgba(212, 175, 55, 0.1);
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: var(--transition);
+            user-select: none;
+        }
+
+        .message-group-header:hover {
+            background: rgba(212, 175, 55, 0.15);
+        }
+
+        .message-group-header.expanded {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .message-group-title {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            text-transform: capitalize;
+        }
+
+        .message-group-count {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-left: 1rem;
+        }
+
+        .message-group-toggle {
+            font-size: 1.5rem;
+            color: var(--text-secondary);
+            transition: transform 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .message-group-header.expanded .message-group-toggle {
+            transform: rotate(180deg);
+        }
+
+        .message-group-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .message-group-content.expanded {
+            max-height: 10000px;
+            transition: max-height 0.5s ease-in;
+        }
+
+        .message-group-messages {
+            padding: 1.5rem;
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .message-group-header .message-group-title-section {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
     </style>
 </head>
 
@@ -357,6 +433,8 @@
         let openDropdowns = new Set();
         // Track selected URLs for each message: { messageId: Set of URLs }
         let selectedUrls = {};
+        // Track expanded groups
+        let expandedGroups = new Set();
 
         // Update Nav Links
         window.api.updateNavLinks(companyId);
@@ -396,6 +474,82 @@
             }
         }
 
+        // Function to extract key themes/words from messages
+        function extractThemes(messages) {
+            const themeKeywords = [
+                'change', 'transform', 'innovation', 'innovate', 'reinvent', 'reinvented',
+                'modernize', 'modernizing', 'modernization', 'digital', 'digitalization',
+                'cloud', 'ai', 'artificial intelligence', 'data', 'analytics',
+                'customer', 'client', 'support', 'service', 'experience',
+                'design', 'implement', 'run', 'operate', 'operations', 'autonomous',
+                'accelerate', 'personalize', 'personalized', 'tech', 'technology',
+                'talent', 'team', 'people', 'together', 'collaboration',
+                'growth', 'success', 'potential', 'unlock', 'deliver', 'delight',
+                'trust', 'trusted', 'partner', 'leading', 'leader',
+                'solution', 'solutions', 'platform', 'service', 'services'
+            ];
+
+            // Group messages by common themes
+            const groups = {};
+            
+            messages.forEach(msg => {
+                const content = msg.content.toLowerCase();
+                const words = content.split(/\s+/);
+                
+                // Find the most prominent theme keyword in this message
+                let bestTheme = null;
+                let bestScore = 0;
+                
+                themeKeywords.forEach(theme => {
+                    const themeWords = theme.split(/\s+/);
+                    let score = 0;
+                    
+                    themeWords.forEach(themeWord => {
+                        // Check if theme word appears in message
+                        if (content.includes(themeWord)) {
+                            // Give higher score for exact word matches
+                            words.forEach(word => {
+                                if (word === themeWord || word.startsWith(themeWord)) {
+                                    score += 2;
+                                } else if (word.includes(themeWord)) {
+                                    score += 1;
+                                }
+                            });
+                        }
+                    });
+                    
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestTheme = theme;
+                    }
+                });
+                
+                // If no theme found, use first significant word (3+ chars, not common words)
+                if (!bestTheme || bestScore === 0) {
+                    const commonWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'we', 'you', 'they', 'it', 'our', 'your', 'their', 'its'];
+                    const significantWords = words.filter(w => w.length >= 3 && !commonWords.includes(w.toLowerCase()));
+                    if (significantWords.length > 0) {
+                        bestTheme = significantWords[0].toLowerCase();
+                    } else {
+                        bestTheme = 'other';
+                    }
+                }
+                
+                // Capitalize theme for display
+                const displayTheme = bestTheme.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                
+                if (!groups[displayTheme]) {
+                    groups[displayTheme] = [];
+                }
+                groups[displayTheme].push(msg);
+            });
+            
+            // Sort groups by number of messages (descending)
+            const sortedGroups = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+            
+            return sortedGroups;
+        }
+
         function renderMessages() {
             const container = document.getElementById('messagesList');
 
@@ -404,7 +558,36 @@
                 return;
             }
 
-            container.innerHTML = messages.map(msg => {
+            // Group messages by themes
+            const groupedMessages = extractThemes(messages);
+            
+            // Render grouped messages
+            container.innerHTML = groupedMessages.map(([theme, themeMessages]) => {
+                const isExpanded = expandedGroups.has(theme);
+                const messageCards = themeMessages.map(msg => renderMessageCard(msg)).join('');
+                
+                return `
+                    <div class="message-group">
+                        <div class="message-group-header ${isExpanded ? 'expanded' : ''}" onclick="toggleGroup('${theme.replace(/'/g, "\\'")}')">
+                            <div class="message-group-title-section">
+                                <span class="message-group-title">${theme}</span>
+                                <span class="message-group-count">(${themeMessages.length} ${themeMessages.length === 1 ? 'message' : 'messages'})</span>
+                            </div>
+                            <span class="message-group-toggle">▼</span>
+                        </div>
+                        <div class="message-group-content ${isExpanded ? 'expanded' : ''}">
+                            <div class="message-group-messages">
+                                ${messageCards}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            updateButton();
+        }
+
+        function renderMessageCard(msg) {
                 const locations = msg.locations || [];
                 const pageCount = locations.length || msg.count || 0;
                 const isDropdownOpen = openDropdowns.has(msg.id);
@@ -445,34 +628,40 @@
                     `;
                 }
 
-                return `
-                    <div class="message-card ${selectedIds.has(msg.id) ? 'selected' : ''}" id="card-${msg.id}" onclick="toggleDropdown('${msg.id}')">
-                        <div class="message-header">
-                            <h3 class="message-title">"${msg.content}"</h3>
-                            <div class="message-header-right">
-                                <div class="message-page-count">Found on ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}</div>
-                                <div class="message-checkbox" onclick="toggleMessage('${msg.id}', event)">
-                                    <input type="checkbox" ${selectedIds.has(msg.id) ? 'checked' : ''}>
-                                </div>
+            return `
+                <div class="message-card ${selectedIds.has(msg.id) ? 'selected' : ''}" id="card-${msg.id}" onclick="toggleDropdown('${msg.id}')">
+                    <div class="message-header">
+                        <h3 class="message-title">"${msg.content}"</h3>
+                        <div class="message-header-right">
+                            <div class="message-page-count">Found on ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}</div>
+                            <div class="message-checkbox" onclick="toggleMessage('${msg.id}', event)">
+                                <input type="checkbox" ${selectedIds.has(msg.id) ? 'checked' : ''}>
                             </div>
                         </div>
-                        <div class="message-meta">
-                            <div class="flex gap-2">
-                                <span class="badge badge-secondary">${msg.message_type}</span>
-                            </div>
-                        </div>
-                        <div class="message-reasoning">
-                            <div class="mt-2 text-sm text-muted italic">
-                                ${msg.reasoning || ''}
-                            </div>
-                        </div>
-                        ${dropdownHTML}
                     </div>
-                `;
-            }).join('');
-
-            updateButton();
+                    <div class="message-meta">
+                        <div class="flex gap-2">
+                            <span class="badge badge-secondary">${msg.message_type}</span>
+                        </div>
+                    </div>
+                    <div class="message-reasoning">
+                        <div class="mt-2 text-sm text-muted italic">
+                            ${msg.reasoning || ''}
+                        </div>
+                    </div>
+                    ${dropdownHTML}
+                </div>
+            `;
         }
+
+        window.toggleGroup = (theme) => {
+            if (expandedGroups.has(theme)) {
+                expandedGroups.delete(theme);
+            } else {
+                expandedGroups.add(theme);
+            }
+            renderMessages();
+        };
 
         window.toggleMessage = (id, event) => {
             // Stop propagation to prevent triggering dropdown toggle
