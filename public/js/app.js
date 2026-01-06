@@ -108,5 +108,90 @@ window.api = {
         
         // EVIDENCES always points to main proofs page (companies-proofs.html)
         if (navEvidences) navEvidences.href = `companies-proofs.html`;
+    },
+
+    // Custom Centered Alert Dialog
+    alert: (message, title = 'Alert') => {
+        return new Promise((resolve) => {
+            // Remove existing dialog if any
+            const existing = document.getElementById('custom-dialog-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'custom-dialog-overlay';
+            overlay.className = 'custom-dialog-overlay';
+            
+            overlay.innerHTML = `
+                <div class="custom-dialog">
+                    <div class="custom-dialog-title">${title}</div>
+                    <div class="custom-dialog-message">${message}</div>
+                    <div class="custom-dialog-buttons">
+                        <button class="btn-primary" onclick="this.closest('.custom-dialog-overlay').remove(); window.customDialogResolve && window.customDialogResolve();">OK</button>
+                    </div>
+                </div>
+            `;
+
+            window.customDialogResolve = resolve;
+            document.body.appendChild(overlay);
+            
+            // Trigger animation
+            setTimeout(() => overlay.classList.add('active'), 10);
+            
+            // Close on Escape key
+            const escapeHandler = (e) => {
+                if (e.key === 'Escape') {
+                    overlay.remove();
+                    window.customDialogResolve = null;
+                    document.removeEventListener('keydown', escapeHandler);
+                    resolve();
+                }
+            };
+            document.addEventListener('keydown', escapeHandler);
+        });
+    },
+
+    // Custom Centered Confirm Dialog
+    confirm: (message, title = 'Confirm') => {
+        return new Promise((resolve) => {
+            // Remove existing dialog if any
+            const existing = document.getElementById('custom-dialog-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = 'custom-dialog-overlay';
+            overlay.className = 'custom-dialog-overlay';
+            
+            overlay.innerHTML = `
+                <div class="custom-dialog">
+                    <div class="custom-dialog-title">${title}</div>
+                    <div class="custom-dialog-message">${message}</div>
+                    <div class="custom-dialog-buttons">
+                        <button class="btn-secondary" onclick="this.closest('.custom-dialog-overlay').remove(); window.customDialogResolve && window.customDialogResolve(false); window.customDialogResolve = null;">Cancel</button>
+                        <button class="btn-primary" onclick="this.closest('.custom-dialog-overlay').remove(); window.customDialogResolve && window.customDialogResolve(true); window.customDialogResolve = null;">OK</button>
+                    </div>
+                </div>
+            `;
+
+            window.customDialogResolve = resolve;
+            document.body.appendChild(overlay);
+            
+            // Trigger animation
+            setTimeout(() => overlay.classList.add('active'), 10);
+            
+            // Close on Escape key (cancels)
+            const escapeHandler = (e) => {
+                if (e.key === 'Escape') {
+                    overlay.remove();
+                    window.customDialogResolve(false);
+                    window.customDialogResolve = null;
+                    document.removeEventListener('keydown', escapeHandler);
+                }
+            };
+            document.addEventListener('keydown', escapeHandler);
+        });
     }
 };
+
+// Override native alert and confirm with custom centered versions
+window.alert = (message) => window.api.alert(message, 'Alert');
+window.confirm = (message) => window.api.confirm(message, 'Confirm');
