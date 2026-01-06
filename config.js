@@ -18,5 +18,9 @@ module.exports = {
     port: process.env.PORT || 3000,
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
-    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY
+    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    googleDriveClientId: process.env.GOOGLE_DRIVE_CLIENT_ID,
+    googleDriveClientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET,
+    googleDriveRefreshToken: process.env.GOOGLE_DRIVE_REFRESH_TOKEN,
+    scrappeyApiKey: process.env.SCRAPPEY_API_KEY
 };

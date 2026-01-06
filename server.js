@@ -23,11 +23,14 @@ if (typeof File === 'undefined' && typeof global !== 'undefined') {
 
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 const { runAnalysisWorkflow } = require('./services/workflow');
 const ScreenshotService = require('./services/screenshotService');
 const screenshotService = new ScreenshotService();
+const { captureScreenshot } = require('./services/scrappeyScreenshot');
 const supabase = require('./services/supabase');
 const config = require('./config');
+const googleDriveService = require('./services/googleDrive');
 
 const app = express();
 const PORT = config.port || 3000;
@@ -170,11 +173,72 @@ app.post('/api/screenshot', async (req, res) => {
     const { companyId, messageId, url, text } = req.body;
 
     try {
-        // 1. Capture Screenshot
-        // We need to pass the text to highlight/find
-        const result = await screenshotService.captureMessage(url, text, messageId);
+        // 1. Try Playwright first (primary method)
+        let result = await screenshotService.captureMessage(url, text, messageId);
+        let screenshotSource = 'playwright';
+
+        // 2. If Playwright fails, fall back to Scrappey
+        if (!result) {
+            console.log(`[Screenshot] Playwright failed for ${url}, trying Scrappey fallback...`);
+            try {
+                const scrappeyResult = await captureScreenshot({
+                    url: url,
+                    upload: true, // Prefer public URL for production
+                    width: 1920,
+                    height: 1080
+                });
+
+                // Convert Scrappey result to match Playwright format
+                let imageBuffer = null;
+                let publicUrl = null;
+
+                if (scrappeyResult.publicUrl) {
+                    // Scrappey provided a public URL - download it to get buffer for Supabase/Google Drive
+                    publicUrl = scrappeyResult.publicUrl;
+                    console.log(`[Screenshot] Scrappey provided public URL: ${publicUrl}, downloading image...`);
+                    try {
+                        const imageResponse = await axios.get(publicUrl, {
+                            responseType: 'arraybuffer',
+                            timeout: 30000
+                        });
+                        imageBuffer = Buffer.from(imageResponse.data);
+                        console.log(`[Screenshot] Downloaded image from Scrappey URL (${imageBuffer.length} bytes)`);
+                    } catch (downloadError) {
+                        console.warn(`[Screenshot] Failed to download image from Scrappey URL: ${downloadError.message}`);
+                        // Continue with public URL only if download fails
+                    }
+                } else if (scrappeyResult.base64) {
+                    // Scrappey provided base64 - convert to buffer
+                    imageBuffer = Buffer.from(scrappeyResult.base64, 'base64');
+                    console.log(`[Screenshot] Scrappey provided base64 (${imageBuffer.length} bytes)`);
+                } else {
+                    throw new Error('Scrappey returned no screenshot data');
+                }
+
+                // Create result object similar to Playwright format
+                result = {
+                    buffer: imageBuffer,
+                    metadata: {
+                        id: require('uuid').v4(),
+                        messageId: messageId,
+                        messageText: text,
+                        url: scrappeyResult.finalURL || url,
+                        dimensions: { width: 1920, height: 1080 },
+                        capturedAt: new Date().toISOString(),
+                        source: 'scrappey'
+                    },
+                    publicUrl: publicUrl // Store public URL if available
+                };
+                screenshotSource = 'scrappey';
+            } catch (scrappeyError) {
+                console.error(`[Screenshot] Scrappey fallback also failed for ${url}:`, scrappeyError.message);
+                // Both methods failed - continue to failure handling below
+                result = null;
+            }
+        }
 
         if (!result) {
+            // Both Playwright and Scrappey failed
             // Store failed attempt in database so it shows up in proofs page
             const { data: failedScreenshot, error: insertError } = await supabase
                 .from('screenshots')
@@ -193,37 +257,50 @@ app.post('/api/screenshot', async (req, res) => {
             return res.status(404).json({ 
                 success: false,
                 error: 'Screenshot capture failed',
-                details: `Could not find text "${text}" on page ${url}. The message may not be visible on this page.`,
+                details: `Could not capture screenshot of page ${url}. Both Playwright and Scrappey methods failed.`,
                 screenshot: failedScreenshot // Return the failed record
             });
         }
 
-        const imageBuffer = result.buffer;
+        // Handle different result formats
+        let imageBuffer = result.buffer;
+        let scrappeyPublicUrl = result.publicUrl; // May be set if Scrappey provided a public URL
 
-        // 2. Upload to Supabase Storage (if bucket exists) or save locally?
-        // Let's try Supabase Storage first.
-        // Assuming bucket 'screenshots' exists.
-        const filename = `${companyId}/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
-
-        const { data, error } = await supabase.storage
-            .from('screenshots')
-            .upload(filename, imageBuffer, {
-                contentType: 'image/png'
-            });
-
+        // 2. Upload to Supabase Storage (always upload to Supabase, even if Scrappey provided a public URL)
         let publicUrl;
 
-        if (error) {
-            console.warn('Supabase upload failed, falling back to base64 return (or local save)', error);
-            // Fallback: return base64 for immediate display (not persistent)
-            // Or better: save to local public folder and serve
-            // For now, let's return base64 data URI
-            publicUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
-        } else {
-            const { data: publicData } = supabase.storage
+        if (imageBuffer) {
+            // Upload buffer to Supabase Storage (Playwright, Scrappey base64, or downloaded from Scrappey URL)
+            const filename = `${companyId}/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+
+            const { data, error } = await supabase.storage
                 .from('screenshots')
-                .getPublicUrl(filename);
-            publicUrl = publicData.publicUrl;
+                .upload(filename, imageBuffer, {
+                    contentType: 'image/png'
+                });
+
+            if (error) {
+                console.warn('Supabase upload failed, falling back to Scrappey URL or base64', error);
+                // Fallback: use Scrappey's public URL if available, otherwise base64
+                if (scrappeyPublicUrl && screenshotSource === 'scrappey') {
+                    publicUrl = scrappeyPublicUrl;
+                    console.log(`[Screenshot] Using Scrappey's public URL as fallback: ${publicUrl}`);
+                } else {
+                    publicUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+                }
+            } else {
+                const { data: publicData } = supabase.storage
+                    .from('screenshots')
+                    .getPublicUrl(filename);
+                publicUrl = publicData.publicUrl;
+                console.log(`[Screenshot] Uploaded to Supabase Storage: ${publicUrl}`);
+            }
+        } else if (scrappeyPublicUrl && screenshotSource === 'scrappey') {
+            // Only use Scrappey URL directly if we couldn't download it (fallback case)
+            publicUrl = scrappeyPublicUrl;
+            console.log(`[Screenshot] Using Scrappey's public URL (download failed): ${publicUrl}`);
+        } else {
+            throw new Error('No image data available from screenshot service');
         }
 
         // 3. Save Record in DB
@@ -242,6 +319,63 @@ app.post('/api/screenshot', async (req, res) => {
 
         if (dbError) throw dbError;
 
+        // 4. Mirror to Google Drive (mirror every successful screenshot)
+        // Mirror if we have an image buffer (always available now since we download from Scrappey URL)
+        if (screenshotRecord && imageBuffer) {
+            console.log(`[Google Drive] Attempting to mirror screenshot ${screenshotRecord.id} for messageId: ${messageId || 'N/A'}...`);
+            try {
+                // Get company name (or domain as fallback) from database
+                const { data: company, error: companyError } = await supabase
+                    .from('companies')
+                    .select('name, domain')
+                    .eq('id', companyId)
+                    .single();
+
+                if (!companyError && company) {
+                    // Use company name if available, otherwise fall back to domain
+                    const companyName = company.name || company.domain;
+                    
+                    if (companyName) {
+                        // Parse created_at timestamp
+                        const createdAt = screenshotRecord.created_at 
+                            ? new Date(screenshotRecord.created_at) 
+                            : new Date();
+
+                        console.log(`[Google Drive] Mirroring screenshot for company: ${companyName}, date: ${createdAt.toISOString().split('T')[0]}`);
+                        
+                        // Mirror screenshot to Google Drive (non-blocking, don't fail if this errors)
+                        googleDriveService.mirrorScreenshot(
+                            imageBuffer,
+                            companyName,
+                            createdAt,
+                            screenshotRecord.id
+                        ).then(success => {
+                            if (success) {
+                                console.log(`[Google Drive] Successfully mirrored screenshot ${screenshotRecord.id}`);
+                            } else {
+                                console.warn(`[Google Drive] Failed to mirror screenshot ${screenshotRecord.id}`);
+                            }
+                        }).catch(error => {
+                            console.error('[Google Drive] Mirror failed (non-critical):', error.message);
+                            console.error('[Google Drive] Error stack:', error.stack);
+                        });
+                    } else {
+                        console.warn(`[Google Drive] Company name and domain are both missing for companyId ${companyId}, skipping Google Drive mirror`);
+                    }
+                } else {
+                    console.warn(`[Google Drive] Could not fetch company for companyId ${companyId}, error:`, companyError?.message);
+                }
+            } catch (mirrorError) {
+                // Don't fail the request if Google Drive mirroring fails
+                console.error('[Google Drive] Error during mirror (non-critical):', mirrorError.message);
+                console.error('[Google Drive] Error stack:', mirrorError.stack);
+            }
+        } else if (screenshotSource === 'scrappey' && !imageBuffer) {
+            console.log(`[Google Drive] Skipping mirror - Scrappey provided public URL only (no buffer available)`);
+        } else {
+            console.warn('[Google Drive] Skipping mirror - screenshotRecord or imageBuffer is null');
+        }
+
         res.json({ success: true, screenshot: screenshotRecord });
 
     } catch (error) {
@@ -250,7 +384,94 @@ app.post('/api/screenshot', async (req, res) => {
     }
 });
 
-// 5. Get Screenshots (for Proofs Gallery) - includes both successful and failed attempts
+// 4b. Generate Screenshot using Scrappey API (Alternative service)
+app.post('/api/screenshot-scrappey', async (req, res) => {
+    const { url, upload, width, height } = req.body;
+
+    // Validate required parameters
+    if (!url) {
+        return res.status(400).json({ 
+            success: false,
+            error: 'URL is required',
+            details: 'Please provide a valid URL in the request body'
+        });
+    }
+
+    // Validate URL format
+    try {
+        new URL(url);
+    } catch (e) {
+        return res.status(400).json({ 
+            success: false,
+            error: 'Invalid URL format',
+            details: `"${url}" is not a valid URL`
+        });
+    }
+
+    // Validate optional parameters
+    const uploadFlag = upload === true || upload === 'true';
+    const screenshotWidth = width ? parseInt(width) : undefined;
+    const screenshotHeight = height ? parseInt(height) : undefined;
+
+    if (screenshotWidth !== undefined && (isNaN(screenshotWidth) || screenshotWidth < 100 || screenshotWidth > 5000)) {
+        return res.status(400).json({ 
+            success: false,
+            error: 'Invalid width',
+            details: 'Width must be a number between 100 and 5000 pixels'
+        });
+    }
+
+    if (screenshotHeight !== undefined && (isNaN(screenshotHeight) || screenshotHeight < 100 || screenshotHeight > 5000)) {
+        return res.status(400).json({ 
+            success: false,
+            error: 'Invalid height',
+            details: 'Height must be a number between 100 and 5000 pixels'
+        });
+    }
+
+    try {
+        // Call Scrappey screenshot service
+        const screenshotOptions = {
+            url: url,
+            upload: uploadFlag
+        };
+
+        // Only include width/height if provided
+        if (screenshotWidth !== undefined) {
+            screenshotOptions.width = screenshotWidth;
+        }
+        if (screenshotHeight !== undefined) {
+            screenshotOptions.height = screenshotHeight;
+        }
+
+        const result = await captureScreenshot(screenshotOptions);
+
+        // Return success response
+        res.json({
+            success: true,
+            screenshot: result
+        });
+
+    } catch (error) {
+        console.error('Scrappey screenshot failed:', error);
+        
+        // Determine appropriate status code
+        let statusCode = 500;
+        if (error.message.includes('required') || error.message.includes('Invalid URL')) {
+            statusCode = 400;
+        } else if (error.message.includes('timeout') || error.message.includes('network')) {
+            statusCode = 504; // Gateway Timeout
+        }
+
+        res.status(statusCode).json({ 
+            success: false,
+            error: 'Screenshot capture failed',
+            details: error.message
+        });
+    }
+});
+
+// 5. Get Screenshots (for Evidences Gallery) - includes both successful and failed attempts
 app.get('/api/company/:id/screenshots', async (req, res) => {
     const { id } = req.params;
     try {
@@ -294,12 +515,12 @@ app.get('/api/companies-with-proofs', async (req, res) => {
         }
 
         // Add proof count to each company
-        const companiesWithProofs = companies.map(company => ({
+        const companiesWithEvidences = companies.map(company => ({
             ...company,
             proof_count: proofCounts[company.id] || 0
         }));
 
-        res.json(companiesWithProofs);
+        res.json(companiesWithEvidences);
     } catch (error) {
         console.error('Error fetching companies with proofs:', error);
         res.status(500).json({ error: 'Failed to fetch companies with proofs' });

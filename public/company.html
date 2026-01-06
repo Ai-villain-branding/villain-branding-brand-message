@@ -380,7 +380,7 @@
             <nav class="nav-links">
                 <a href="index.html" class="nav-link">DASHBOARD</a>
                 <a href="companies.html" class="nav-link active">MESSAGES</a>
-                <a href="#" class="nav-link" id="navProofs">PROOFS</a>
+                <a href="#" class="nav-link" id="navEvidences">EVIDENCES</a>
             </nav>
         </div>
     </header>
@@ -398,8 +398,8 @@
                         <p class="text-muted" id="companyUrl">Fetching brand messages...</p>
                     </div>
                     <div>
-                        <button id="generateProofsBtn" class="btn btn-primary" disabled>
-                            GENERATE PROOFS (<span id="selectedCount">0</span>)
+                        <button id="generateEvidencesBtn" class="btn btn-primary" disabled>
+                            GENERATE EVIDENCE (<span id="selectedCount">0</span>)
                         </button>
                     </div>
                 </div>
@@ -424,9 +424,9 @@
         const companyName = document.getElementById('companyName');
         const companyUrl = document.getElementById('companyUrl');
         const messagesList = document.getElementById('messagesList');
-        const generateProofsBtn = document.getElementById('generateProofsBtn');
+        const generateEvidencesBtn = document.getElementById('generateEvidencesBtn');
         const selectedCount = document.getElementById('selectedCount');
-        const navProofs = document.getElementById('navProofs');
+        const navEvidences = document.getElementById('navEvidences');
 
         let messages = [];
         let selectedIds = new Set();
@@ -669,8 +669,13 @@
                 event.stopPropagation();
             }
             
-            if (selectedIds.has(id)) selectedIds.delete(id);
-            else selectedIds.add(id);
+            if (selectedIds.has(id)) {
+                selectedIds.delete(id);
+                console.log(`Deselected message ${id}`);
+            } else {
+                selectedIds.add(id);
+                console.log(`Selected message ${id}`);
+            }
             renderMessages();
         };
 
@@ -744,16 +749,17 @@
         };
 
         function updateButton() {
-            const btn = document.getElementById('generateProofsBtn');
+            const btn = document.getElementById('generateEvidencesBtn');
             const count = document.getElementById('selectedCount');
             
             // Count total selected URLs across all selected messages
             let totalSelectedUrls = 0;
             selectedIds.forEach(msgId => {
-                if (selectedUrls[msgId]) {
+                // If user explicitly selected some URLs, use those
+                if (selectedUrls[msgId] && selectedUrls[msgId].size > 0) {
                     totalSelectedUrls += selectedUrls[msgId].size;
                 } else {
-                    // If message is selected but no URLs selected, use all URLs
+                    // If message is selected but no explicit URL selections, use all URLs
                     const msg = messages.find(m => m.id === msgId);
                     if (msg && msg.locations && msg.locations.length > 0) {
                         totalSelectedUrls += msg.locations.length;
@@ -765,10 +771,24 @@
             btn.disabled = totalSelectedUrls === 0;
         }
 
-        document.getElementById('generateProofsBtn').onclick = async () => {
-            const btn = document.getElementById('generateProofsBtn');
+        document.getElementById('generateEvidencesBtn').onclick = async () => {
+            const btn = document.getElementById('generateEvidencesBtn');
+            const countSpan = document.getElementById('selectedCount');
+            
+            // Validate that we have selected messages
+            if (selectedIds.size === 0) {
+                alert('Please select at least one message to generate evidence.');
+                return;
+            }
+            
+            console.log('Generate evidence clicked. Selected messages:', Array.from(selectedIds));
+            console.log('Selected URLs:', selectedUrls);
+            
+            // Store original button content
+            const originalButtonHTML = btn.innerHTML;
+            
             btn.disabled = true;
-            btn.textContent = 'GENERATING...';
+            btn.innerHTML = 'GENERATING...';
 
             try {
                 // Generate screenshots for selected URLs
@@ -776,23 +796,39 @@
                 
                 Array.from(selectedIds).forEach(msgId => {
                     const msg = messages.find(m => m.id === msgId);
-                    if (!msg) return;
+                    if (!msg) {
+                        console.warn(`Message with id ${msgId} not found`);
+                        return;
+                    }
+                    
+                    console.log(`Processing message ${msgId}: "${msg.content}"`);
                     
                     // Get URLs to screenshot for this message
+                    // Logic matches updateButton(): if explicit URL selections exist, use those;
+                    // otherwise, if message is selected, use all URLs from locations
                     let urlsToScreenshot = [];
                     if (selectedUrls[msgId] && selectedUrls[msgId].size > 0) {
-                        // Use selected URLs
+                        // User explicitly selected some URLs, use those
                         urlsToScreenshot = Array.from(selectedUrls[msgId]);
+                        console.log(`Using ${urlsToScreenshot.length} selected URLs for message ${msgId}`);
                     } else if (msg.locations && msg.locations.length > 0) {
-                        // If no URLs selected, use all locations
+                        // Message is selected but no explicit URL selections, use all locations
                         urlsToScreenshot = msg.locations;
+                        console.log(`Using all ${urlsToScreenshot.length} locations for message ${msgId}`);
+                    }
+                    
+                    if (urlsToScreenshot.length === 0) {
+                        console.warn(`No URLs available for message ${msgId}`);
+                        return;
                     }
                     
                     // Generate screenshot for each selected URL
                     urlsToScreenshot.forEach(url => {
+                        console.log(`Generating screenshot for URL: ${url}`);
                         promises.push(
                             window.api.generateScreenshot(companyId, msgId, url, msg.content)
                                 .then(result => {
+                                    console.log(`Screenshot result for ${url}:`, result);
                                     // API returns success: false for failed attempts
                                     // This allows us to track failed attempts
                                     return result;
@@ -806,15 +842,27 @@
                     });
                 });
 
+                if (promises.length === 0) {
+                    alert('No URLs available to generate screenshots. Please ensure selected messages have page URLs.');
+                    btn.disabled = false;
+                    btn.innerHTML = originalButtonHTML;
+                    updateButton();
+                    return;
+                }
+
+                console.log(`Generating ${promises.length} screenshots...`);
+
                 // Wait for all screenshots to complete
                 const results = await Promise.all(promises);
                 const successCount = results.filter(r => r && r.success === true).length;
                 const totalCount = results.length;
                 
+                console.log(`Screenshot generation complete: ${successCount}/${totalCount} successful`);
+                
                 if (successCount === 0 && totalCount > 0) {
-                    alert(`All ${totalCount} screenshot generation attempts failed. Failed attempts are saved and can be re-generated from the Proofs page.`);
+                    alert(`All ${totalCount} screenshot generation attempts failed. Failed attempts are saved and can be re-generated from the Evidences page.`);
                 } else if (successCount < totalCount) {
-                    alert(`Generated ${successCount} out of ${totalCount} screenshots. Failed attempts are saved and can be re-generated from the Proofs page.`);
+                    alert(`Generated ${successCount} out of ${totalCount} screenshots. Failed attempts are saved and can be re-generated from the Evidences page.`);
                 } else if (successCount > 0) {
                     alert(`Successfully generated ${successCount} screenshot(s)!`);
                 }
@@ -825,6 +873,7 @@
                 console.error('Error generating proofs:', error);
                 alert('Failed to generate proofs. Check console for details.');
                 btn.disabled = false;
+                btn.innerHTML = originalButtonHTML;
                 updateButton();
             }
         };

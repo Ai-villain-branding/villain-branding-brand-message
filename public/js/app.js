@@ -44,7 +44,7 @@ window.api = {
     getCompanies: () => apiRequest('/api/companies'),
 
     // 2b. Get Companies with Proof Counts
-    getCompaniesWithProofs: () => apiRequest('/api/companies-with-proofs'),
+    getCompaniesWithEvidences: () => apiRequest('/api/companies-with-proofs'),
 
     // 2c. Delete Company
     deleteCompany: (companyId) => apiRequest(`/api/company/${companyId}`, {
@@ -93,17 +93,17 @@ window.api = {
             navMessages = Array.from(allNavLinks).find(a => a.textContent.trim() === 'MESSAGES');
         }
         
-        // Find PROOFS link - try by ID first, then by text content
-        let navProofs = document.getElementById('navProofs');
-        if (!navProofs) {
+        // Find EVIDENCES link - try by ID first, then by text content
+        let navEvidences = document.getElementById('navEvidences');
+        if (!navEvidences) {
             const allNavLinks = document.querySelectorAll('a.nav-link');
-            navProofs = Array.from(allNavLinks).find(a => a.textContent.trim() === 'PROOFS');
+            navEvidences = Array.from(allNavLinks).find(a => a.textContent.trim() === 'EVIDENCES');
         }
 
         // MESSAGES always points to companies list page
         if (navMessages) navMessages.href = `companies.html`;
         
-        // PROOFS always points to main proofs page (companies-proofs.html)
-        if (navProofs) navProofs.href = `companies-proofs.html`;
+        // EVIDENCES always points to main proofs page (companies-proofs.html)
+        if (navEvidences) navEvidences.href = `companies-proofs.html`;
     }
 };

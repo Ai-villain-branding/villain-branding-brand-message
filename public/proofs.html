@@ -4,22 +4,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visual Proofs | Villain Branding</title>
+    <title>Visual Evidences | Villain Branding</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
     <style>
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+
         .page-layout {
-            margin-top: 8rem;
-            margin-bottom: 4rem;
+            margin-top: 2rem;
+            margin-bottom: 2rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+            transition: var(--transition);
+            cursor: pointer;
+        }
+
+        .back-button:hover {
+            color: var(--text-primary);
+        }
+
+        .back-button::before {
+            content: '←';
+            font-size: 1.2rem;
+        }
+
+        .sticky-header-section {
+            background-color: var(--bg-primary);
+            z-index: 80;
+            padding-top: 1rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1.5rem;
+            flex-shrink: 0;
+            width: 100%;
+            max-width: var(--container-width);
+            margin-left: auto;
+            margin-right: auto;
+            padding-left: 2rem;
+            padding-right: 2rem;
         }
 
         .header-row {
             display: flex;
             justify-content: space-between;
             align-items: flex-end;
-            margin-bottom: 3rem;
-            padding-bottom: 2rem;
+            width: 100%;
+        }
+
+        .scrollable-proofs-container {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 0.5rem;
+            /* Hide scrollbar for Chrome, Safari and Opera */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+
+        .scrollable-proofs-container::-webkit-scrollbar {
+            display: none;
+        }
+
+        .proofs-container {
+            display: flex;
+            flex-direction: column;
+            gap: 3rem;
+        }
+
+        .date-group {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            gap: 1.5rem;
+        }
+
+        .date-label {
+            width: 100%;
+            padding: 1rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            position: sticky;
+            top: 0;
+            background-color: var(--bg-primary);
+            z-index: 10;
             border-bottom: 1px solid var(--border);
+        }
+
+        .date-proofs {
+            width: 100%;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+        }
+
+        @media (min-width: 1200px) {
+            .date-proofs {
+                grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            }
         }
 
         .proofs-grid {
@@ -64,6 +169,25 @@
             font-size: 0.85rem;
             color: var(--text-muted);
             font-family: var(--font-sans);
+        }
+
+        .found-on-display {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: rgba(212, 175, 55, 0.15);
+            border: 1px solid rgba(212, 175, 55, 0.3);
+            border-radius: var(--radius-pill);
+            color: var(--text-primary);
+            font-weight: 500;
+            text-decoration: none;
+            transition: var(--transition);
+            margin-left: 0.25rem;
+        }
+
+        .found-on-display:hover {
+            background: rgba(212, 175, 55, 0.25);
+            border-color: rgba(212, 175, 55, 0.5);
+            transform: translateY(-1px);
         }
 
         .proof-card {
@@ -320,29 +444,40 @@
             <nav class="nav-links">
                 <a href="index.html" class="nav-link">DASHBOARD</a>
                 <a href="#" class="nav-link" id="navMessages">MESSAGES</a>
-                <a href="#" class="nav-link active">PROOFS</a>
+                <a href="#" class="nav-link active">EVIDENCES</a>
             </nav>
         </div>
     </header>
 
     <div class="container page-layout">
-        <div class="header-row">
-            <div>
-                <h1 id="companyName">Loading...</h1>
-                <p class="text-muted">Visual Proofs</p>
-            </div>
-            <div>
-                <button class="btn btn-secondary" onclick="window.print()">
-                    EXPORT PDF
-                </button>
+        <div style="flex-shrink: 0;">
+            <!-- Back Button -->
+            <a href="companies-proofs.html" class="back-button">Back</a>
+
+            <!-- Sticky Header Section -->
+            <div class="sticky-header-section">
+                <div class="header-row">
+                    <div>
+                        <h1 id="companyName">Loading...</h1>
+                        <p class="text-muted">Visual Evidences</p>
+                    </div>
+                    <div>
+                        <button class="btn btn-secondary" id="exportEvidencesBtn" onclick="exportEvidences()">
+                            EXPORT EVIDENCES
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div id="proofsGrid" class="proofs-grid">
-            <!-- Proofs injected here -->
-            <div class="text-center" style="grid-column: 1/-1; padding: 4rem;">
-                <div class="spinner" style="margin: 0 auto 1rem;"></div>
-                <p class="text-muted">Generating screenshots...</p>
+        <!-- Scrollable Proofs Grid -->
+        <div class="scrollable-proofs-container">
+            <div id="proofsGrid" class="proofs-container">
+                <!-- Evidences injected here -->
+                <div class="text-center" style="padding: 4rem;">
+                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                    <p class="text-muted">Generating screenshots...</p>
+                </div>
             </div>
         </div>
     </div>
@@ -379,10 +514,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
     <script src="js/app.js"></script>
     <script>
-        // Proofs Page Logic
+        // Evidences Page Logic
         const companyId = window.api.getCompanyId();
         const companyName = document.getElementById('companyName');
         const proofsGrid = document.getElementById('proofsGrid');
+        let currentCompany = null; // Store company data for use in rendering
 
         // Update Nav Links
         window.api.updateNavLinks(companyId);
@@ -398,6 +534,7 @@
                 const companies = await window.api.getCompanies();
                 const company = companies.find(c => c.id === companyId);
                 if (company) {
+                    currentCompany = company; // Store for use in rendering
                     document.getElementById('companyName').textContent = company.name || company.domain;
                 }
 
@@ -405,56 +542,94 @@
                 const messages = await window.api.getCompanyMessages(companyId);
                 
                 // Fetch existing screenshots
-                const existingProofs = await window.api.getScreenshots(companyId);
+                const existingEvidences = await window.api.getScreenshots(companyId);
                 
                 // Render all pages from messages with re-capture option
-                renderAllPages(messages, existingProofs);
+                renderAllPages(messages, existingEvidences, currentCompany);
             } catch (error) {
                 console.error('Error loading proofs:', error);
                 document.getElementById('proofsGrid').innerHTML = `<p class="text-center text-error">Failed to load proofs.</p>`;
             }
         }
 
-        function renderAllPages(messages, existingProofs) {
-            const container = document.getElementById('proofsGrid');
+        // Helper function to format date as "Jan 5, 2026"
+        function formatDate(dateString) {
+            if (!dateString) return 'Unknown Date';
+            const date = new Date(dateString);
+            const options = { month: 'short', day: 'numeric', year: 'numeric' };
+            return date.toLocaleDateString('en-US', options);
+        }
 
-            // Only show screenshots that have been generated (existingProofs)
-            if (!existingProofs || existingProofs.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
-                return;
-            }
+        // Helper function to get date key (YYYY-MM-DD) for grouping
+        function getDateKey(dateString) {
+            if (!dateString) return 'unknown';
+            const date = new Date(dateString);
+            return date.toISOString().split('T')[0];
+        }
 
-            // Create a map of messages by ID for content lookup
-            const messagesMap = new Map();
-            if (messages) {
-                messages.forEach(msg => {
-                    messagesMap.set(msg.id, msg);
-                });
-            }
-
-            // Render cards for all proofs (successful and failed)
-            container.innerHTML = existingProofs.map((proof, index) => {
-                const message = messagesMap.get(proof.message_id);
-                const messageContent = message?.content || proof.message_content || 'Unknown message';
-                const cardId = `proof-${proof.id}`;
-                const isFailed = !proof.image_url || proof.status === 'failed';
-                
-                // Safely get URL pathname
-                let urlPath = '/';
-                let urlHref = '#';
-                if (proof.original_url) {
-                    try {
-                        const urlObj = new URL(proof.original_url);
-                        urlPath = urlObj.pathname || '/';
-                        urlHref = proof.original_url;
-                    } catch (e) {
-                        // If URL parsing fails, use the original_url as is
-                        urlPath = proof.original_url;
-                        urlHref = proof.original_url;
-                    }
+        // Helper function to group screenshots by date
+        function groupByDate(screenshots) {
+            const groups = new Map();
+            
+            screenshots.forEach(proof => {
+                const dateKey = getDateKey(proof.created_at);
+                if (!groups.has(dateKey)) {
+                    groups.set(dateKey, []);
                 }
-                
-                return `
+                groups.get(dateKey).push(proof);
+            });
+            
+            // Convert to array and sort by date (descending - latest first)
+            return Array.from(groups.entries())
+                .sort((a, b) => b[0].localeCompare(a[0])); // Sort dates descending
+        }
+
+        // Helper function to format "Found on" display
+        // Always displays only the domain name, regardless of the page path
+        function formatFoundOnDisplay(originalUrl, company) {
+            if (!originalUrl) {
+                return { display: 'Unknown', href: '#' };
+            }
+
+            try {
+                const urlObj = new URL(originalUrl);
+                const fullUrl = originalUrl; // Keep full URL for href attribute
+
+                // Get domain from company data or extract from URL
+                let domain = '';
+                if (company && company.domain) {
+                    domain = company.domain;
+                } else {
+                    domain = urlObj.hostname;
+                }
+
+                // Always display only the domain name
+                return { display: domain, href: fullUrl };
+            } catch (e) {
+                // If URL parsing fails, try to extract domain from string
+                try {
+                    const match = originalUrl.match(/https?:\/\/([^\/]+)/);
+                    const domain = match ? match[1] : originalUrl;
+                    return { display: domain, href: originalUrl };
+                } catch {
+                    return { display: 'Unknown', href: originalUrl };
+                }
+            }
+        }
+
+        // Helper function to render a single proof card
+        function renderProofCard(proof, messagesMap, company) {
+            const message = messagesMap.get(proof.message_id);
+            const messageContent = message?.content || proof.message_content || 'Unknown message';
+            const cardId = `proof-${proof.id}`;
+            const isFailed = !proof.image_url || proof.status === 'failed';
+            
+            // Format "Found on" display
+            const foundOnData = formatFoundOnDisplay(proof.original_url, company);
+            const foundOnDisplay = foundOnData.display;
+            const foundOnHref = foundOnData.href;
+            
+            return `
                 <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
                   ${isFailed ? `
                     <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete failed attempt">×</button>
@@ -476,16 +651,57 @@
                   <div class="proof-content">
                     <div class="proof-text">"${messageContent}"</div>
                     <div class="proof-meta">
-                      Found on: <a href="${urlHref}" target="_blank" class="text-accent">${urlPath}</a>
+                      Found on: <a href="${foundOnHref}" target="_blank" class="found-on-display">${foundOnDisplay}</a>
                     </div>
                     <div style="margin-top: 1rem;">
-                      <button class="btn btn-secondary" onclick="reCaptureScreenshot('${proof.message_id || ''}', '${(proof.original_url || '').replace(/'/g, "\\'")}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', event)" style="width: 100%;">
+                      <button class="btn btn-secondary re-capture-btn" data-proof-id="${proof.id}" data-image-url="${proof.image_url || ''}" data-is-failed="${isFailed}" onclick="handleReCaptureOrDownload('${proof.message_id || ''}', '${(proof.original_url || '').replace(/'/g, "\\'")}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', '${proof.image_url || ''}', ${isFailed}, event)" style="width: 100%;">
                         ${isFailed ? 'RE-GENERATE' : 'RE-CAPTURE'}
                       </button>
                     </div>
                   </div>
                 </div>
             `;
+        }
+
+        function renderAllPages(messages, existingEvidences, company) {
+            const container = document.getElementById('proofsGrid');
+
+            // Only show screenshots that have been generated (existingEvidences)
+            if (!existingEvidences || existingEvidences.length === 0) {
+                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                return;
+            }
+
+            // Create a map of messages by ID for content lookup
+            const messagesMap = new Map();
+            if (messages) {
+                messages.forEach(msg => {
+                    messagesMap.set(msg.id, msg);
+                });
+            }
+
+            // Group screenshots by date (already sorted by created_at desc from API)
+            const dateGroups = groupByDate(existingEvidences);
+
+            // Render date groups
+            if (dateGroups.length === 0) {
+                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                return;
+            }
+
+            // If only one date group, we can optionally hide the date label, but let's show it for consistency
+            container.innerHTML = dateGroups.map(([dateKey, proofs]) => {
+                const formattedDate = formatDate(proofs[0].created_at);
+                const proofCards = proofs.map(proof => renderProofCard(proof, messagesMap, company)).join('');
+                
+                return `
+                    <div class="date-group">
+                        <div class="date-label">${formattedDate}</div>
+                        <div class="date-proofs">
+                            ${proofCards}
+                        </div>
+                    </div>
+                `;
             }).join('');
         }
 
@@ -548,7 +764,7 @@
             }
         }
 
-        function renderProofs(proofs) {
+        function renderEvidences(proofs) {
             const container = document.getElementById('proofsGrid');
 
             if (!proofs || proofs.length === 0) {
@@ -589,6 +805,10 @@
                 await window.api.deleteScreenshot(screenshotId);
                 
                 if (card) {
+                    // Find the date-proofs container and date-group
+                    const dateProofsContainer = card.closest('.date-proofs');
+                    const dateGroup = card.closest('.date-group');
+                    
                     // Immediately remove the entire card with animation - no placeholder, completely gone
                     card.style.opacity = '0';
                     card.style.transform = 'scale(0.9)';
@@ -596,12 +816,33 @@
                     setTimeout(() => {
                         card.remove();
                         
-                        // Check if there are any cards left
-                        const container = document.getElementById('proofsGrid');
-                        const remainingCards = container.querySelectorAll('.proof-card');
-                        
-                        if (remainingCards.length === 0) {
-                            container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                        // Check if the date group is now empty
+                        if (dateProofsContainer && dateProofsContainer.querySelectorAll('.proof-card').length === 0) {
+                            // Remove the entire date group
+                            if (dateGroup) {
+                                dateGroup.style.opacity = '0';
+                                dateGroup.style.transform = 'translateY(-10px)';
+                                dateGroup.style.transition = 'all 0.3s ease';
+                                setTimeout(() => {
+                                    dateGroup.remove();
+                                    
+                                    // Check if there are any date groups left
+                                    const container = document.getElementById('proofsGrid');
+                                    const remainingGroups = container.querySelectorAll('.date-group');
+                                    
+                                    if (remainingGroups.length === 0) {
+                                        container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                                    }
+                                }, 300);
+                            }
+                        } else {
+                            // Check if there are any cards left in the entire container
+                            const container = document.getElementById('proofsGrid');
+                            const remainingCards = container.querySelectorAll('.proof-card');
+                            
+                            if (remainingCards.length === 0) {
+                                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                            }
                         }
                     }, 300);
                 } else {
@@ -795,6 +1036,88 @@
                 closeLightbox();
             }
         });
+
+        // Export Evidences function - changes all RE-CAPTURE buttons to download buttons
+        function exportEvidences() {
+            const reCaptureButtons = document.querySelectorAll('.re-capture-btn');
+            reCaptureButtons.forEach(button => {
+                const isFailed = button.getAttribute('data-is-failed') === 'true';
+                if (!isFailed) {
+                    button.textContent = 'download as png';
+                    button.setAttribute('data-export-mode', 'true');
+                }
+            });
+        }
+
+        // Handle RE-CAPTURE or download based on current state
+        function handleReCaptureOrDownload(messageId, url, text, screenshotId, imageUrl, isFailed, event) {
+            event.stopPropagation();
+            
+            const button = event.target;
+            const isExportMode = button.getAttribute('data-export-mode') === 'true';
+            
+            if (isExportMode && !isFailed) {
+                // Download as PNG
+                downloadScreenshotAsPng(imageUrl, screenshotId);
+            } else {
+                // Original RE-CAPTURE behavior
+                reCaptureScreenshot(messageId, url, text, screenshotId, event);
+            }
+        }
+
+        // Download screenshot as PNG
+        function downloadScreenshotAsPng(imageUrl, screenshotId) {
+            if (!imageUrl) {
+                alert('No image available to download.');
+                return;
+            }
+
+            // Create a temporary anchor element to trigger download
+            const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = `evidence-${screenshotId || Date.now()}.png`;
+            
+            // Set crossOrigin to handle CORS if needed
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = function() {
+                try {
+                    // Create a canvas to convert the image
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Convert canvas to blob and download
+                    canvas.toBlob(function(blob) {
+                        const url = URL.createObjectURL(blob);
+                        link.href = url;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                    }, 'image/png');
+                } catch (error) {
+                    // Fallback: direct download
+                    console.warn('Canvas conversion failed, using direct download:', error);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            };
+            
+            img.onerror = function() {
+                // Fallback: direct download if image load fails
+                console.warn('Image load failed, using direct download');
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+            
+            img.src = imageUrl;
+        }
 
         // Init
         init();

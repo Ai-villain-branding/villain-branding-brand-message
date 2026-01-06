@@ -1,5 +1,7 @@
 const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
 
 class ScreenshotService {
     constructor() {
@@ -26,7 +28,16 @@ class ScreenshotService {
                 }
             }
 
-            // Launch new browser with resource limits for Railway
+            // Get absolute path to chrome extension directory
+            const extensionPath = path.resolve(__dirname, '..', 'chrome-extension');
+            
+            // Verify extension directory exists
+            if (!fs.existsSync(extensionPath)) {
+                console.warn(`Chrome extension directory not found at ${extensionPath}, will use direct script injection instead`);
+            }
+
+            // Launch new browser with resource limits for Railway and Chrome extension loaded
+            // Note: Extensions may not work in headless mode, so we'll also inject the script directly
             this.browser = await chromium.launch({
                 headless: true,
                 args: [
@@ -35,7 +46,7 @@ class ScreenshotService {
                     '--disable-dev-shm-usage', // Use /tmp instead of /dev/shm
                     '--disable-gpu',
                     '--disable-software-rasterizer',
-                    '--disable-extensions',
+                    ...(fs.existsSync(extensionPath) ? [`--load-extension=${extensionPath}`] : []), // Load Chrome extension if it exists
                     '--disable-background-networking',
                     '--disable-background-timer-throttling',
                     '--disable-backgrounding-occluded-windows',
@@ -58,6 +69,89 @@ class ScreenshotService {
         if (this.browser) {
             await this.browser.close();
             this.browser = null;
+        }
+    }
+
+    // Detect if the page is an error/blocked page
+    async detectErrorPage(page) {
+        try {
+            const errorIndicators = await page.evaluate(() => {
+                const bodyText = (document.body.innerText || document.body.textContent || '').toLowerCase();
+                const title = (document.title || '').toLowerCase();
+                const url = window.location.href.toLowerCase();
+                
+                // Common error page indicators
+                const errorPatterns = [
+                    'access denied',
+                    'access forbidden',
+                    '403 forbidden',
+                    '404 not found',
+                    'page not found',
+                    'forbidden',
+                    'unauthorized',
+                    'blocked',
+                    'you don\'t have permission',
+                    'reference #', // Cloudflare error pages
+                    'errors.edgesuite.net', // Akamai error pages
+                    'cloudflare',
+                    'this site can\'t be reached',
+                    'err_',
+                    'cf-ray',
+                    'checking your browser',
+                ];
+                
+                // Check title, body text, and URL for error indicators
+                for (const pattern of errorPatterns) {
+                    if (title.includes(pattern) || bodyText.includes(pattern) || url.includes(pattern)) {
+                        return true;
+                    }
+                }
+                
+                // Check for very short content (error pages are often minimal)
+                const textLength = bodyText.trim().length;
+                if (textLength < 200 && (title.includes('error') || title.includes('denied') || title.includes('forbidden'))) {
+                    return true;
+                }
+                
+                return false;
+            });
+            
+            return errorIndicators;
+        } catch (error) {
+            // If detection fails, assume it's not an error page (better to try than to skip)
+            return false;
+        }
+    }
+
+    // Scroll page to reveal content that might be below the fold
+    async scrollPageToRevealContent(page) {
+        try {
+            // Get page dimensions
+            const dimensions = await page.evaluate(() => {
+                return {
+                    scrollHeight: document.documentElement.scrollHeight,
+                    scrollWidth: document.documentElement.scrollWidth,
+                    clientHeight: window.innerHeight,
+                    clientWidth: window.innerWidth
+                };
+            });
+
+            // Scroll down in increments to reveal content
+            const scrollIncrement = dimensions.clientHeight * 0.8; // Scroll 80% of viewport height
+            const maxScrolls = Math.ceil(dimensions.scrollHeight / scrollIncrement);
+            
+            for (let i = 0; i < Math.min(maxScrolls, 5); i++) { // Limit to 5 scrolls
+                await page.evaluate((scrollY) => {
+                    window.scrollTo(0, scrollY);
+                }, i * scrollIncrement);
+                await page.waitForTimeout(300); // Wait for content to load
+            }
+
+            // Scroll back to top
+            await page.evaluate(() => window.scrollTo(0, 0));
+            await page.waitForTimeout(300);
+        } catch (error) {
+            console.warn('Error scrolling page:', error.message);
         }
     }
 
@@ -190,31 +284,43 @@ class ScreenshotService {
     async findElementWithText(page, text) {
         const cleanText = text.trim().replace(/\s+/g, ' ');
         const normalizedText = cleanText.toLowerCase();
+        
+        // Also create a version with common punctuation removed for better matching
+        const normalizedTextNoPunct = normalizedText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
 
         // Strategy 1: Custom script to find the smallest element containing the full text
         // This handles case-insensitive matching and finds the most specific element
         try {
-            const handle = await page.evaluateHandle(({ targetText, normalizedTarget }) => {
-                const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li, button, label, strong, em, b, i');
+            const handle = await page.evaluateHandle(({ targetText, normalizedTarget, normalizedTargetNoPunct }) => {
+                // Get all text-containing elements, including those in shadow DOM if possible
+                const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li, button, label, strong, em, b, i, article, section, blockquote, cite');
                 let bestMatch = null;
                 let minArea = Infinity;
                 let bestScore = 0;
 
                 for (const el of elements) {
                     const elText = (el.innerText || el.textContent || '').trim();
-                    const normalizedElText = elText.toLowerCase().replace(/\s+/g, ' ');
+                    if (!elText) continue;
                     
-                    // Check if element contains the target text (case-insensitive)
-                    if (normalizedElText.includes(normalizedTarget)) {
+                    const normalizedElText = elText.toLowerCase().replace(/\s+/g, ' ');
+                    const normalizedElTextNoPunct = normalizedElText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
+                    
+                    // Check if element contains the target text (case-insensitive, with or without punctuation)
+                    const containsText = normalizedElText.includes(normalizedTarget) || 
+                                       normalizedElTextNoPunct.includes(normalizedTargetNoPunct);
+                    
+                    if (containsText) {
                         const rect = el.getBoundingClientRect();
                         const area = rect.width * rect.height;
                         
                         // Score based on how well the text matches
                         let score = 0;
-                        if (normalizedElText === normalizedTarget) {
+                        if (normalizedElText === normalizedTarget || normalizedElTextNoPunct === normalizedTargetNoPunct) {
                             score = 100; // Exact match
                         } else if (normalizedElText.startsWith(normalizedTarget) || normalizedElText.endsWith(normalizedTarget)) {
                             score = 80; // Starts or ends with
+                        } else if (normalizedElTextNoPunct.includes(normalizedTargetNoPunct)) {
+                            score = 70; // Match without punctuation
                         } else {
                             score = 60; // Contains
                         }
@@ -231,7 +337,7 @@ class ScreenshotService {
                     }
                 }
                 return bestMatch;
-            }, { targetText: cleanText, normalizedTarget: normalizedText });
+            }, { targetText: cleanText, normalizedTarget: normalizedText, normalizedTargetNoPunct: normalizedTextNoPunct });
 
             if (handle && handle.asElement()) {
                 return handle.asElement();
@@ -240,9 +346,10 @@ class ScreenshotService {
             console.warn('Strategy 1 failed:', error.message);
         }
 
-        // Strategy 2: Try to find by exact text match (case-insensitive)
+        // Strategy 2: Try to find text that might be split across multiple elements
         try {
-            const element = await page.evaluateHandle(({ targetText, normalizedTarget }) => {
+            const element = await page.evaluateHandle(({ targetText, normalizedTarget, normalizedTargetNoPunct }) => {
+                // Get all text nodes and check if their combined text contains the target
                 const walker = document.createTreeWalker(
                     document.body,
                     NodeFilter.SHOW_TEXT,
@@ -250,17 +357,26 @@ class ScreenshotService {
                 );
                 
                 let node;
+                const textNodes = [];
                 while (node = walker.nextNode()) {
                     const text = node.textContent.trim();
+                    if (text) {
+                        textNodes.push({ node, text });
+                    }
+                }
+                
+                // Check individual nodes
+                for (const { node, text } of textNodes) {
                     const normalizedText = text.toLowerCase().replace(/\s+/g, ' ');
+                    const normalizedTextNoPunct = normalizedText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
                     
-                    if (normalizedText.includes(normalizedTarget)) {
+                    if (normalizedText.includes(normalizedTarget) || normalizedTextNoPunct.includes(normalizedTargetNoPunct)) {
                         // Find the parent element
                         let parent = node.parentElement;
                         while (parent && parent !== document.body) {
                             // Prefer semantic elements
                             const tag = parent.tagName.toLowerCase();
-                            if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div', 'a', 'li'].includes(tag)) {
+                            if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div', 'a', 'li', 'article', 'section'].includes(tag)) {
                                 return parent;
                             }
                             parent = parent.parentElement;
@@ -268,8 +384,33 @@ class ScreenshotService {
                         return node.parentElement;
                     }
                 }
+                
+                // Check if text is split across adjacent text nodes
+                for (let i = 0; i < textNodes.length - 1; i++) {
+                    const combinedText = (textNodes[i].text + ' ' + textNodes[i + 1].text).trim();
+                    const normalizedCombined = combinedText.toLowerCase().replace(/\s+/g, ' ');
+                    const normalizedCombinedNoPunct = normalizedCombined.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
+                    
+                    if (normalizedCombined.includes(normalizedTarget) || normalizedCombinedNoPunct.includes(normalizedTargetNoPunct)) {
+                        // Return the parent container of both nodes
+                        let parent1 = textNodes[i].node.parentElement;
+                        let parent2 = textNodes[i + 1].node.parentElement;
+                        
+                        // Find common ancestor
+                        while (parent1 && parent1 !== document.body) {
+                            if (parent1.contains(parent2) || parent1 === parent2) {
+                                return parent1;
+                            }
+                            parent1 = parent1.parentElement;
+                        }
+                        
+                        // Fallback to first node's parent
+                        return textNodes[i].node.parentElement;
+                    }
+                }
+                
                 return null;
-            }, { targetText: cleanText, normalizedTarget: normalizedText });
+            }, { targetText: cleanText, normalizedTarget: normalizedText, normalizedTargetNoPunct: normalizedTextNoPunct });
             
             if (element && element.asElement()) {
                 return element.asElement();
@@ -284,6 +425,49 @@ class ScreenshotService {
             if (await element.count() > 0) return element.first();
         } catch (error) {
             console.warn('Strategy 3 failed:', error.message);
+        }
+
+        // Strategy 4: Try searching in iframes
+        try {
+            const frames = page.frames();
+            for (const frame of frames) {
+                if (frame === page.mainFrame()) continue; // Skip main frame, already searched
+                try {
+                    const frameElement = await frame.evaluateHandle(({ targetText, normalizedTarget }) => {
+                        const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li');
+                        for (const el of elements) {
+                            const elText = (el.innerText || el.textContent || '').trim();
+                            const normalizedElText = elText.toLowerCase().replace(/\s+/g, ' ');
+                            if (normalizedElText.includes(normalizedTarget)) {
+                                return el;
+                            }
+                        }
+                        return null;
+                    }, { targetText: cleanText, normalizedTarget: normalizedText });
+                    
+                    if (frameElement && frameElement.asElement()) {
+                        return frameElement.asElement();
+                    }
+                } catch (frameError) {
+                    // Continue to next frame
+                }
+            }
+        } catch (error) {
+            console.warn('Strategy 4 (iframe search) failed:', error.message);
+        }
+
+        // Strategy 5: Try partial text match (first 30 characters)
+        if (cleanText.length > 30) {
+            try {
+                const partialText = cleanText.substring(0, 30).trim();
+                const element = page.getByText(partialText, { exact: false });
+                if (await element.count() > 0) {
+                    console.log(`Found partial match for text (first 30 chars): "${partialText}"`);
+                    return element.first();
+                }
+            } catch (error) {
+                // Ignore partial match errors
+            }
         }
 
         return null;
@@ -413,6 +597,138 @@ class ScreenshotService {
         return finalBox;
     }
 
+    // Inject content script directly into page (fallback when extension doesn't load)
+    async injectStabilizerScript(page) {
+        try {
+            const contentScriptPath = path.resolve(__dirname, '..', 'chrome-extension', 'content.js');
+            
+            if (fs.existsSync(contentScriptPath)) {
+                const contentScript = fs.readFileSync(contentScriptPath, 'utf8');
+                // Inject script before page loads using addInitScript
+                await page.addInitScript(contentScript);
+                console.log('Screenshot stabilizer script injected directly into page');
+                return true;
+            } else {
+                console.warn('Content script file not found, cannot inject stabilizer');
+                return false;
+            }
+        } catch (error) {
+            console.warn('Failed to inject stabilizer script:', error.message);
+            return false;
+        }
+    }
+
+    // Wait for Chrome extension to be ready and use its stabilization utilities
+    async waitForExtensionReady(page) {
+        try {
+            // Wait for extension/script to initialize (with timeout)
+            // Note: Script should already be injected via addInitScript before navigation
+            const maxWaitTime = 3000; // 3 seconds max wait
+            const startTime = Date.now();
+            
+            while (Date.now() - startTime < maxWaitTime) {
+                const isReady = await page.evaluate(() => {
+                    return window.screenshotStabilizerReady === true;
+                }).catch(() => false);
+                
+                if (isReady) {
+                    // Extension/script is ready, use its utilities
+                    try {
+                        // Wait for fonts to load (extension function returns a Promise)
+                        await page.evaluate(async () => {
+                            if (window.screenshotStabilizer && window.screenshotStabilizer.waitForFonts) {
+                                await window.screenshotStabilizer.waitForFonts();
+                            }
+                        });
+                        
+                        // Wait for animations to complete (extension function returns a Promise)
+                        await page.evaluate(async () => {
+                            if (window.screenshotStabilizer && window.screenshotStabilizer.waitForAnimations) {
+                                await window.screenshotStabilizer.waitForAnimations();
+                            }
+                        });
+                        
+                        // Force load lazy content (synchronous function)
+                        await page.evaluate(() => {
+                            if (window.screenshotStabilizer && window.screenshotStabilizer.forceLoadLazyContent) {
+                                window.screenshotStabilizer.forceLoadLazyContent();
+                            }
+                        });
+                        
+                        // Wait for fully loaded state if available
+                        const fullyLoaded = await page.evaluate(() => {
+                            return new Promise((resolve) => {
+                                if (window.screenshotStabilizerFullyLoaded) {
+                                    resolve(true);
+                                } else {
+                                    // Wait up to 2 seconds for fully loaded state
+                                    const checkInterval = setInterval(() => {
+                                        if (window.screenshotStabilizerFullyLoaded) {
+                                            clearInterval(checkInterval);
+                                            resolve(true);
+                                        }
+                                    }, 100);
+                                    setTimeout(() => {
+                                        clearInterval(checkInterval);
+                                        resolve(false); // Timeout - extension may not set this flag
+                                    }, 2000);
+                                }
+                            });
+                        });
+                        
+                        if (fullyLoaded) {
+                            console.log('Screenshot stabilizer ready and page stabilized');
+                        }
+                        
+                        return true;
+                    } catch (utilError) {
+                        console.warn('Stabilizer utilities error (continuing anyway):', utilError.message);
+                        return true; // Stabilizer is ready even if utilities fail
+                    }
+                }
+                
+                // Wait a bit before checking again
+                await page.waitForTimeout(100);
+            }
+            
+            // If script was injected but not ready, try to initialize it manually
+            try {
+                // Try to trigger initialization manually
+                await page.evaluate(() => {
+                    if (typeof window.screenshotStabilizer === 'undefined') {
+                        // Script might not have initialized, try to run it
+                        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                            // Force initialization
+                            const event = new Event('DOMContentLoaded');
+                            document.dispatchEvent(event);
+                        }
+                    }
+                });
+                // Give it a moment
+                await page.waitForTimeout(500);
+                
+                // Check again
+                const isReady = await page.evaluate(() => {
+                    return window.screenshotStabilizerReady === true;
+                }).catch(() => false);
+                
+                if (isReady) {
+                    return true;
+                }
+            } catch (e) {
+                // Ignore initialization errors
+            }
+            
+            // Stabilizer didn't load in time, but continue anyway (fallback behavior)
+            console.warn('Screenshot stabilizer did not initialize in time, continuing without stabilization features');
+            return false;
+        } catch (error) {
+            // Stabilizer failed to load, but continue with normal screenshot flow
+            console.warn('Screenshot stabilizer not available (continuing without stabilization features):', error.message);
+            return false;
+        }
+    }
+
     // Highlight element for better visibility in screenshot
     async highlightElement(element) {
         try {
@@ -457,6 +773,9 @@ class ScreenshotService {
                 timeout: 30000
             });
 
+            // Inject stabilizer script before navigation (works better than extension in headless mode)
+            await this.injectStabilizerScript(page);
+
             // Navigate to page with more lenient wait strategy
             // Use 'load' instead of 'networkidle' to avoid timeout on sites with continuous network activity
             try {
@@ -473,14 +792,149 @@ class ScreenshotService {
                 });
             }
 
+            // Wait for Chrome extension/script to be ready and stabilize the page
+            await this.waitForExtensionReady(page);
+
             // Wait a bit for any animations and dynamic content
             await page.waitForTimeout(2000);
+
+            // Check if page is an error/blocked page before proceeding
+            const isErrorPage = await this.detectErrorPage(page);
+            if (isErrorPage) {
+                const errorDetails = await page.evaluate(() => {
+                    const bodyText = document.body.innerText || document.body.textContent || '';
+                    const title = document.title || '';
+                    return { bodyText: bodyText.substring(0, 200), title };
+                }).catch(() => ({ bodyText: '', title: '' }));
+                
+                throw new Error(`Page is blocked or inaccessible. Error: ${errorDetails.title || 'Access Denied'}. ${errorDetails.bodyText.substring(0, 100)}`);
+            }
 
             // Close any popups, modals, or cookie banners before taking screenshot
             await this.closePopups(page);
 
-            // Find element containing the message
-            const element = await this.findElementWithText(page, messageText);
+            // Scroll page to reveal content that might be below the fold
+            await this.scrollPageToRevealContent(page);
+
+            // Wait for dynamic content to load after scrolling
+            await page.waitForTimeout(1500);
+
+            // Wait for network to be idle (for dynamically loaded content)
+            try {
+                await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            } catch (e) {
+                // Ignore timeout, continue anyway
+            }
+
+            // Find element containing the message (with retry and scrolling)
+            let element = await this.findElementWithText(page, messageText);
+            
+            // If not found, try scrolling and searching again
+            if (!element) {
+                console.log('Text not found on initial search, trying with page scroll...');
+                await this.scrollPageToRevealContent(page);
+                await page.waitForTimeout(2000);
+                // Wait for any lazy-loaded content
+                await page.evaluate(() => {
+                    // Trigger scroll events that might load content
+                    window.dispatchEvent(new Event('scroll'));
+                });
+                await page.waitForTimeout(1000);
+                element = await this.findElementWithText(page, messageText);
+            }
+            
+            // If still not found, try searching for partial matches with different lengths
+            if (!element) {
+                console.log('Full text not found, trying partial matches...');
+                // Try progressively smaller chunks
+                const partialLengths = [50, 40, 30, 20];
+                for (const len of partialLengths) {
+                    if (messageText.length > len) {
+                        const partialText = messageText.substring(0, len).trim();
+                        element = await this.findElementWithText(page, partialText);
+                        if (element) {
+                            console.log(`Found partial match (first ${len} chars): "${partialText}"`);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // If still not found, try searching for key phrases
+            if (!element) {
+                console.log('Trying to find key phrases from the text...');
+                // Extract key phrases (words of 4+ characters)
+                const words = messageText.split(/\s+/).filter(w => w.length >= 4);
+                if (words.length > 0) {
+                    // Try first significant word
+                    element = await this.findElementWithText(page, words[0]);
+                    if (!element && words.length > 1) {
+                        // Try a phrase of first 2-3 significant words
+                        const phrase = words.slice(0, Math.min(3, words.length)).join(' ');
+                        element = await this.findElementWithText(page, phrase);
+                    }
+                }
+            }
+            
+            // Debug: Log page text if still not found
+            if (!element) {
+                const pageText = await page.evaluate(() => {
+                    return document.body.innerText || document.body.textContent || '';
+                }).catch(() => '');
+                console.log(`Page text preview (first 500 chars): ${pageText.substring(0, 500)}`);
+                console.log(`Searching for: "${messageText.substring(0, 100)}..."`);
+            }
+
+            // If exact text not found, try to find a related element with key terms
+            if (!element) {
+                // Extract key terms (important words, 5+ characters)
+                const keyTerms = messageText
+                    .split(/\s+/)
+                    .filter(word => word.length >= 5)
+                    .map(word => word.replace(/[.,;:!?'"()\-]/g, ''))
+                    .filter(word => word.length >= 5)
+                    .slice(0, 3); // Take top 3 key terms
+                
+                if (keyTerms.length > 0) {
+                    console.log(`Exact text not found, searching for key terms: ${keyTerms.join(', ')}`);
+                    for (const term of keyTerms) {
+                        element = await this.findElementWithText(page, term);
+                        if (element) {
+                            console.log(`Found element containing key term: "${term}"`);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Last resort: try to find main content area (but only if not an error page)
+            if (!element) {
+                // Double-check it's not an error page before using fallback
+                const isErrorPage = await this.detectErrorPage(page);
+                if (isErrorPage) {
+                    throw new Error(`Page appears to be blocked or inaccessible. Cannot capture screenshot.`);
+                }
+                
+                try {
+                    const fallbackElement = await page.evaluateHandle(() => {
+                        // Find the main content area (article, main, or largest text container)
+                        const mainContent = document.querySelector('main, article, [role="main"]') || 
+                                          document.querySelector('.content, .main-content, #content, #main');
+                        if (mainContent) {
+                            return mainContent;
+                        }
+                        // Fallback to body
+                        return document.body;
+                    });
+                    
+                    if (fallbackElement && fallbackElement.asElement()) {
+                        console.log('Using fallback: capturing main content area');
+                        element = fallbackElement.asElement();
+                    }
+                } catch (e) {
+                    // Ignore fallback errors
+                }
+            }
 
             if (!element) {
                 throw new Error(`Could not find text "${messageText}" on page`);

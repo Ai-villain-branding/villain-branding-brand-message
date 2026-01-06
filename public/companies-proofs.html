@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Company Proofs | Villain Branding</title>
+    <title>Company Evidences | Villain Branding</title>
     <link rel="stylesheet" href="css/styles.css">
     <style>
         /* Fixed Heading Container */
@@ -65,7 +65,7 @@
             <nav class="nav-links">
                 <a href="index.html" class="nav-link">DASHBOARD</a>
                 <a href="companies.html" class="nav-link">MESSAGES</a>
-                <a href="companies-proofs.html" class="nav-link active">PROOFS</a>
+                <a href="companies-proofs.html" class="nav-link active">EVIDENCES</a>
             </nav>
         </div>
     </header>
@@ -74,7 +74,7 @@
     <div class="fixed-heading-container">
         <h1 class="hero-title fixed-heading">
             <span>COMPANY</span>
-            <span>PROOFS</span>
+            <span>EVIDENCES</span>
         </h1>
     </div>
 
@@ -93,7 +93,7 @@
 
         async function loadCompanies() {
             try {
-                const companies = await window.api.getCompaniesWithProofs();
+                const companies = await window.api.getCompaniesWithEvidences();
                 renderCompanies(companies);
             } catch (error) {
                 console.error('Failed to load companies:', error);
@@ -119,9 +119,9 @@
           </div>
           <div class="flex items-center gap-4">
             <span class="badge badge-primary" style="padding: 0.8rem 1.5rem; font-size: 1rem;">
-              ${company.proof_count} ${company.proof_count === 1 ? 'Proof' : 'Proofs'}
+              ${company.proof_count} ${company.proof_count === 1 ? 'Proof' : 'Evidences'}
             </span>
-            <span class="btn btn-secondary">VIEW PROOFS</span>
+            <span class="btn btn-secondary">VIEW EVIDENCES</span>
           </div>
         </div>
       `).join('');
