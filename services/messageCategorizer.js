@@ -56,48 +56,96 @@ function generateCategoriesPrompt(messages) {
    ${msg.reasoning ? `Reasoning: ${msg.reasoning}` : ''}`;
     }).join('\n\n');
 
-    return `You are a brand messaging expert. Analyze the following brand messages and group them into high-level, generalized semantic categories.
+    const allMessageIds = messages.map(m => m.id).join(', ');
 
-CRITICAL RULES:
-1. Generate 3-8 category names that represent BROAD, GENERALIZED themes - think at the highest conceptual level
-2. Category names MUST be exactly 2 words maximum (e.g., "Value Proposition", "Trust Signals", "Product Features", "Brand Positioning", "Customer Benefits", "Market Leadership")
-3. Each category MUST contain at least 2 messages
-4. Focus on GENERALIZED themes that capture the core essence - avoid overly specific or narrow categories
-5. Category names should be meaningful business concepts, not generic placeholders like "Other" or "Misc"
-6. Assign each message to exactly ONE category based on its primary semantic theme
-7. Group messages by their HIGHEST-LEVEL meaning - look for the fundamental theme, not surface-level keywords
-8. Consider the overall business purpose of messages when categorizing (e.g., "Trust Building", "Value Delivery", "Market Position")
-9. Category names should be Title Case, exactly 2 words (e.g., "Brand Identity", "Product Capabilities", "Customer Success")
+    return `You are a brand messaging expert. Your task is to analyze the following brand messages and group them into high-level, generalized semantic categories.
 
-EXAMPLES OF GOOD GENERALIZED CATEGORIES (2 words):
-- "Value Proposition" - messages about core value offered
-- "Trust Signals" - messages building credibility
-- "Product Features" - messages about product capabilities
-- "Brand Positioning" - messages about market position
-- "Customer Benefits" - messages about customer outcomes
-- "Market Leadership" - messages about industry standing
+═══════════════════════════════════════════════════════════════
+STRICT REQUIREMENTS - FOLLOW THESE EXACTLY:
+═══════════════════════════════════════════════════════════════
 
-MESSAGES TO CATEGORIZE:
+STEP 1: CATEGORY GENERATION
+- Generate 3-8 category names that represent BROAD, GENERALIZED themes
+- Category names MUST be small, relevant phrases (2-5 words maximum)
+- Use Title Case format (e.g., "Value Proposition", "Building Trust Signals", "Product Feature Highlights")
+- Each category name must be a meaningful business concept phrase
+- DO NOT use generic placeholders like "Other", "Misc", "General", or "Various"
+- Focus on HIGHEST-LEVEL semantic themes, not surface-level keywords
+- Keep phrases concise but descriptive - they should capture the essence clearly
+
+STEP 2: MESSAGE MAPPING (CRITICAL)
+- You MUST assign EVERY message ID to exactly ONE category
+- NO message ID can be omitted
+- NO message ID can appear in multiple categories
+- Each category MUST contain at least 2 messages
+- Group messages by their PRIMARY semantic theme (highest conceptual level)
+
+STEP 3: VALIDATION CHECKLIST
+Before returning your response, verify:
+✓ Every message ID from the list below appears in exactly one category
+✓ All ${messages.length} message IDs are accounted for
+✓ Each category has at least 2 message IDs
+✓ All category names are small, relevant phrases (2-5 words)
+✓ All category names are unique
+✓ JSON format is valid and matches the required structure exactly
+
+═══════════════════════════════════════════════════════════════
+CATEGORY NAMING EXAMPLES (Small Relevant Phrases, Title Case):
+═══════════════════════════════════════════════════════════════
+✓ "Value Proposition" - messages about core value offered
+✓ "Building Trust Signals" - messages building credibility
+✓ "Product Feature Highlights" - messages about product capabilities
+✓ "Brand Market Positioning" - messages about market position
+✓ "Customer Success Benefits" - messages about customer outcomes
+✓ "Market Leadership Status" - messages about industry standing
+✓ "Brand Identity Elements" - messages about brand essence
+✓ "Service Quality Excellence" - messages about service excellence
+✓ "Competitive Advantages" - messages about competitive edge
+✓ "Customer Testimonials" - messages featuring customer feedback
+
+✗ INVALID: "Value" (too short, single word)
+✗ INVALID: "The Complete Guide to Understanding Our Value Proposition Statement" (too long, >5 words)
+✗ INVALID: "Other Messages" (generic placeholder)
+✗ INVALID: "Miscellaneous Content" (generic placeholder)
+
+═══════════════════════════════════════════════════════════════
+MESSAGES TO CATEGORIZE (Total: ${messages.length} messages):
+═══════════════════════════════════════════════════════════════
 ${messagesList}
 
-Return ONLY valid JSON in this exact format:
+═══════════════════════════════════════════════════════════════
+REQUIRED JSON FORMAT (STRICT):
+═══════════════════════════════════════════════════════════════
+You MUST return ONLY valid JSON in this EXACT format:
+
 {
   "categories": [
     {
-      "name": "Two Word Category",
+      "name": "Small Relevant Phrase",
       "description": "Brief explanation of what this category represents",
       "message_ids": ["uuid1", "uuid2", "uuid3"]
+    },
+    {
+      "name": "Another Category Phrase",
+      "description": "Brief explanation",
+      "message_ids": ["uuid4", "uuid5"]
     }
   ]
 }
 
-IMPORTANT:
-- Every message ID must appear in exactly one category
-- All message IDs from the list above must be included
-- Category names must be unique
-- Category names MUST be exactly 2 words (no more, no less)
-- Minimum 2 messages per category
-- Focus on GENERALIZED, HIGH-LEVEL themes, not specific details`;
+═══════════════════════════════════════════════════════════════
+FINAL VALIDATION:
+═══════════════════════════════════════════════════════════════
+ALL MESSAGE IDs THAT MUST BE INCLUDED:
+${allMessageIds}
+
+Before submitting, count:
+1. Total message IDs in your response: Must equal ${messages.length}
+2. Total categories: Must be between 3-8
+3. Messages per category: Each must have ≥2 message IDs
+4. Category name word count: Each must be 2-5 words (small relevant phrases)
+
+Your response will be automatically validated. If any message ID is missing, duplicated, or incorrectly formatted, the response will be rejected.`;
 }
 
 /**
@@ -113,7 +161,38 @@ async function callOpenAIForCategorization(prompt, retries = 3) {
             messages: [
                 {
                     role: 'system',
-                    content: 'You are a brand messaging expert that categorizes messages into semantic themes. Always return valid JSON only.'
+                    content: `You are a brand messaging categorization expert. Your role is to analyze brand messages and group them into semantic categories.
+
+CRITICAL SYSTEM REQUIREMENTS:
+1. You MUST return ONLY valid JSON - no additional text, explanations, or markdown formatting
+2. Every message ID provided in the input MUST appear in exactly ONE category's message_ids array
+3. NO message ID can be omitted, duplicated, or placed in multiple categories
+4. Category names MUST be small, relevant phrases (2-5 words) in Title Case format
+5. Each category MUST contain at least 2 message IDs
+6. You MUST generate 3-8 categories total
+7. Category names must be unique and represent high-level business concepts as descriptive phrases
+8. Your response will be programmatically validated - any deviation will cause failure
+
+VALIDATION RULES YOU MUST FOLLOW:
+- Count all message IDs in your response - must match the input count exactly
+- Verify each message ID appears exactly once across all categories
+- Ensure all category names are small, relevant phrases (2-5 words, no more, no less)
+- Ensure each category has at least 2 message IDs
+- Use only valid JSON syntax - no markdown code blocks, no comments
+- Category names should be meaningful business phrases, not single words or overly long descriptions
+
+Your response format must be:
+{
+  "categories": [
+    {
+      "name": "Small Relevant Phrase",
+      "description": "Description text",
+      "message_ids": ["id1", "id2", "id3"]
+    }
+  ]
+}
+
+Remember: Completeness and accuracy of message ID mapping is MANDATORY. Missing or duplicate IDs will cause your response to be rejected.`
                 },
                 {
                     role: 'user',
@@ -254,17 +333,21 @@ function normalizeCategoryName(name) {
         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
 
-    // Enforce 2-word maximum for category names
+    // Enforce small phrase limit (2-5 words) for category names
     const words = normalized.split(/\s+/).filter(w => w.length > 0);
-    if (words.length > 2) {
-        // Take first 2 words if more than 2
-        normalized = words.slice(0, 2).join(' ');
-        console.log(`[Categorizer] Truncated category name to 2 words: "${normalized}"`);
+    if (words.length > 5) {
+        // Take first 5 words if more than 5
+        normalized = words.slice(0, 5).join(' ');
+        console.log(`[Categorizer] Truncated category name to 5 words: "${normalized}"`);
+    }
+    if (words.length < 2) {
+        // If less than 2 words, pad or use as-is (will be validated)
+        console.warn(`[Categorizer] Category name has less than 2 words: "${normalized}"`);
     }
 
-    // Limit total length
-    if (normalized.length > 50) {
-        normalized = normalized.substring(0, 50).trim();
+    // Limit total length (allow for longer phrases)
+    if (normalized.length > 80) {
+        normalized = normalized.substring(0, 80).trim();
     }
 
     return normalized;
