@@ -14,7 +14,8 @@
     "test:crawler": "node tests/testCrawler.js",
     "test:extractor": "node tests/testExtractor.js",
     "test:ai": "node tests/testAI.js",
-    "test:screenshots": "node tests/testScreenshots.js"
+    "test:screenshots": "node tests/testScreenshots.js",
+    "test:categorizer": "node tests/testMessageCategorizer.js"
   },
   "keywords": [
     "brand-messaging",

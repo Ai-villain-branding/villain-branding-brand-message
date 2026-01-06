@@ -93,7 +93,7 @@ async function captureScreenshot(options) {
             headers: {
                 'Content-Type': 'application/json'
             },
-            timeout: 60000 // 60 second timeout for screenshot capture
+            timeout: 180000 // 180 second (3 minute) timeout for screenshot capture
         });
 
         // Validate HTTP response

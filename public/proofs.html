@@ -432,6 +432,37 @@
             background: rgba(220, 38, 38, 0.9);
             transform: scale(1.1);
         }
+        /* Loader Styles */
+        .screenshot-loader {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 300px;
+            background: var(--bg-primary);
+            border: 1px dashed var(--border);
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(212, 175, 55, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loader-text {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-top: 0.5rem;
+        }
     </style>
 </head>
 
@@ -725,6 +756,17 @@
             button.disabled = true;
             button.textContent = 'CAPTURING...';
 
+            // Show loader in place of "Failed to Capture" message
+            const placeholder = card.querySelector('.proof-placeholder');
+            if (placeholder) {
+                placeholder.className = 'screenshot-loader';
+                placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center;';
+                placeholder.innerHTML = `
+                    <div class="spinner"></div>
+                    <div class="loader-text">Capturing screenshot...</div>
+                `;
+            }
+
             try {
                 // Get company ID from URL or global
                 const companyId = window.api.getCompanyId();
@@ -732,6 +774,20 @@
                     alert('Company ID not found');
                     button.disabled = false;
                     button.textContent = originalText;
+                    
+                    // Restore "Failed to Capture" message
+                    const placeholder = card.querySelector('.proof-placeholder, .screenshot-loader');
+                    if (placeholder) {
+                        placeholder.className = 'proof-placeholder';
+                        placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);';
+                        placeholder.innerHTML = `
+                            <div style="text-align: center;">
+                                <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
+                                <div style="margin-bottom: 0.5rem;">📷</div>
+                                <div>Click RE-GENERATE to try again</div>
+                            </div>
+                        `;
+                    }
                     return;
                 }
 
@@ -760,6 +816,21 @@
                 console.error('Error capturing screenshot:', error);
                 button.disabled = false;
                 button.textContent = originalText;
+                
+                // Restore "Failed to Capture" message if loader was shown
+                const placeholder = card.querySelector('.proof-placeholder, .screenshot-loader');
+                if (placeholder && placeholder.classList.contains('screenshot-loader')) {
+                    placeholder.innerHTML = `
+                        <div style="text-align: center;">
+                            <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
+                            <div style="margin-bottom: 0.5rem;">📷</div>
+                            <div>Click RE-GENERATE to try again</div>
+                        </div>
+                    `;
+                    placeholder.className = 'proof-placeholder';
+                    placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);';
+                }
+                
                 alert('Failed to capture screenshot: ' + (error.message || 'Please try again.'));
             }
         }

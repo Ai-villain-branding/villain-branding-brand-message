@@ -54,6 +54,9 @@ window.api = {
     // 3. Get Company Messages
     getCompanyMessages: (companyId) => apiRequest(`/api/company/${companyId}/messages`),
 
+    // 3b. Get Company Categories with Messages
+    getCompanyCategories: (companyId) => apiRequest(`/api/company/${companyId}/categories`),
+
     // 4. Generate Screenshot
     generateScreenshot: (companyId, messageId, url, text) => apiRequest('/api/screenshot', {
         method: 'POST',

@@ -155,16 +155,102 @@ app.delete('/api/company/:id', async (req, res) => {
 // 3. Get Company Messages (for Company View)
 app.get('/api/company/:id/messages', async (req, res) => {
     const { id } = req.params;
+    const includeCategories = req.query.include_categories === 'true';
+    
     try {
-        const { data, error } = await supabase
+        let query = supabase
             .from('brand_messages')
             .select('*')
             .eq('company_id', id);
 
+        if (includeCategories) {
+            // Join with categories directly
+            query = supabase
+                .from('brand_messages')
+                .select(`
+                    *,
+                    message_categories (
+                        id,
+                        name,
+                        description
+                    )
+                `)
+                .eq('company_id', id);
+        }
+
+        const { data, error } = await query;
+
         if (error) throw error;
-        res.json(data);
+
+        // Transform data if categories are included
+        if (includeCategories && data) {
+            const transformed = data.map(msg => {
+                const category = msg.message_categories;
+                return {
+                    ...msg,
+                    category_id: category?.id || null,
+                    category_name: category?.name || null,
+                    message_categories: undefined // Remove nested data
+                };
+            });
+            res.json(transformed);
+        } else {
+            res.json(data);
+        }
     } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch messages' });
+        console.error('Error fetching messages:', error);
+        res.status(500).json({ error: 'Failed to fetch messages', details: error.message });
+    }
+});
+
+// 3b. Get Company Categories with Messages
+app.get('/api/company/:id/categories', async (req, res) => {
+    const { id } = req.params;
+    try {
+        // Fetch categories for this company
+        const { data: categories, error: categoriesError } = await supabase
+            .from('message_categories')
+            .select('*')
+            .eq('company_id', id)
+            .order('message_count', { ascending: false });
+
+        if (categoriesError) throw categoriesError;
+
+        if (!categories || categories.length === 0) {
+            return res.json({ categories: [] });
+        }
+
+        // Fetch messages for each category (using direct category_id on messages)
+        const categoriesWithMessages = await Promise.all(
+            categories.map(async (category) => {
+                // Fetch messages directly by category_id
+                const { data: messages, error: messagesError } = await supabase
+                    .from('brand_messages')
+                    .select('*')
+                    .eq('category_id', category.id);
+
+                if (messagesError) {
+                    console.error(`Error fetching messages for category ${category.id}:`, messagesError);
+                    return {
+                        ...category,
+                        messages: []
+                    };
+                }
+
+                return {
+                    id: category.id,
+                    name: category.name,
+                    description: category.description,
+                    message_count: category.message_count,
+                    messages: messages || []
+                };
+            })
+        );
+
+        res.json({ categories: categoriesWithMessages });
+    } catch (error) {
+        console.error('Error fetching categories:', error);
+        res.status(500).json({ error: 'Failed to fetch categories', details: error.message });
     }
 });
 

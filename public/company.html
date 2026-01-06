@@ -429,6 +429,7 @@
         const navEvidences = document.getElementById('navEvidences');
 
         let messages = [];
+        let categorizedData = null; // Will contain { categories: [...] } if AI categories exist
         let selectedIds = new Set();
         let openDropdowns = new Set();
         // Track selected URLs for each message: { messageId: Set of URLs }
@@ -446,16 +447,7 @@
             }
 
             try {
-                // Fetch messages
-                messages = await window.api.getCompanyMessages(companyId);
-
-                // We don't have a separate endpoint for company details yet, 
-                // but we can infer from messages or fetch from companies list if needed.
-                // For now, let's just use the first message's company_id or fetch companies list to find name.
-                // Better: add getCompany endpoint. But for now, let's just fetch all companies and find ours
-                // or just display "Company Messages" generic title if we can't find it.
-
-                // Let's try to fetch companies list to find name
+                // Fetch company details
                 const companies = await window.api.getCompanies();
                 const company = companies.find(c => c.id === companyId);
 
@@ -465,6 +457,31 @@
                 } else {
                     document.getElementById('companyName').textContent = 'Company Messages';
                     document.getElementById('companyUrl').textContent = 'Unknown Company';
+                }
+
+                // Try to fetch AI categories first
+                try {
+                    const categoriesResponse = await window.api.getCompanyCategories(companyId);
+                    if (categoriesResponse && categoriesResponse.categories && categoriesResponse.categories.length > 0) {
+                        categorizedData = categoriesResponse;
+                        // Flatten messages from categories for compatibility
+                        messages = [];
+                        categoriesResponse.categories.forEach(cat => {
+                            if (cat.messages && cat.messages.length > 0) {
+                                messages.push(...cat.messages);
+                            }
+                        });
+                        console.log(`Loaded ${categoriesResponse.categories.length} AI categories`);
+                    } else {
+                        // No categories, fetch raw messages
+                        messages = await window.api.getCompanyMessages(companyId);
+                        categorizedData = null;
+                    }
+                } catch (categoryError) {
+                    // Fall back to raw messages if category fetch fails
+                    console.warn('Failed to fetch categories, using fallback:', categoryError);
+                    messages = await window.api.getCompanyMessages(companyId);
+                    categorizedData = null;
                 }
 
                 renderMessages();
@@ -558,8 +575,19 @@
                 return;
             }
 
-            // Group messages by themes
-            const groupedMessages = extractThemes(messages);
+            let groupedMessages;
+
+            // Use AI categories if available, otherwise fall back to keyword grouping
+            if (categorizedData && categorizedData.categories && categorizedData.categories.length > 0) {
+                // Group by AI categories
+                groupedMessages = categorizedData.categories.map(cat => [
+                    cat.name,
+                    cat.messages || []
+                ]).filter(([name, msgs]) => msgs.length > 0);
+            } else {
+                // Fall back to keyword-based grouping
+                groupedMessages = extractThemes(messages);
+            }
             
             // Render grouped messages
             container.innerHTML = groupedMessages.map(([theme, themeMessages]) => {

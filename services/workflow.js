@@ -4,6 +4,7 @@ const { cleanContent } = require('./contentCleaner');
 const { classifyContent } = require('./classifier');
 const supabase = require('./supabase');
 const { v4: uuidv4 } = require('uuid');
+const { categorizeMessages } = require('./messageCategorizer');
 
 /**
  * Orchestrates the full analysis workflow for a company
@@ -384,6 +385,26 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                     // Continue to next batch instead of failing everything
                 }
             }
+        }
+
+        // 6. Categorize Messages with AI
+        try {
+            console.log('Starting AI categorization...');
+            // Fetch all messages for this company (including existing ones)
+            const { data: allCompanyMessages, error: fetchError } = await supabase
+                .from('brand_messages')
+                .select('id, content, message_type, reasoning')
+                .eq('company_id', companyId);
+
+            if (!fetchError && allCompanyMessages && allCompanyMessages.length > 0) {
+                await categorizeMessages(companyId, allCompanyMessages);
+                console.log('AI categorization completed successfully.');
+            } else {
+                console.log('No messages found for categorization.');
+            }
+        } catch (categorizationError) {
+            // Don't fail the workflow if categorization fails
+            console.error('Categorization failed (workflow continues):', categorizationError.message);
         }
 
         console.log('Analysis workflow completed successfully.');
