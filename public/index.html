@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Company Dashboard | Villain Branding</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .btn-add-page:hover {
+      background: var(--accent) !important;
+      border-color: var(--accent) !important;
+      color: var(--bg-primary) !important;
+      transform: scale(1.1);
+    }
+
+    .btn-remove-page:hover {
+      background: rgba(220, 38, 38, 0.9) !important;
+      border-color: #dc2626 !important;
+      color: white !important;
+      transform: scale(1.1);
+    }
+
+    .page-input-row {
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .page-url-input:focus {
+      outline: none;
+      border-bottom-color: var(--accent);
+    }
+  </style>
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="container nav-container">
+      <div class="logo" onclick="window.location.href='index.html'" style="cursor: pointer;">
+        VILLAIN <span>BRANDING™</span>
+      </div>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link active">DASHBOARD</a>
+        <a href="companies.html" class="nav-link">MESSAGES</a>
+        <a href="companies-proofs.html" class="nav-link">EVIDENCES</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container">
+    <section class="hero-section" style="min-height: 80vh; display: flex; align-items: center;">
+      <div class="hero-grid">
+        <div class="hero-text">
+          <h1 class="hero-title" style="font-size: 5rem;">
+            <span>CLIENT</span>
+            <span>DASHBOARD</span>
+          </h1>
+        </div>
+
+        <div class="hero-content">
+          <h2 class="hero-subtitle">Manage Brand Analyses</h2>
+          <p class="hero-description">
+            Choose how you want to analyze: scrape the entire website or specify individual pages to analyze.
+          </p>
+
+          <div class="analysis-form-container">
+            <form id="addCompanyForm">
+              <!-- Option 1: Full Website Scraping -->
+              <div style="margin-bottom: 2rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                  Option 1: Scrape Entire Website
+                </label>
+                <div class="input-group">
+                  <input type="url" id="companyUrl" class="input" placeholder="Enter company website URL (e.g., https://example.com)">
+                </div>
+              </div>
+
+              <!-- Option 2: Specific Pages -->
+              <div style="margin-bottom: 2rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                  Option 2: Specific Pages Only
+                </label>
+                <div id="pagesContainer">
+                  <div class="page-input-row" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;">
+                    <input type="url" class="input page-url-input" placeholder="Enter page URL..." style="flex: 1;">
+                    <button type="button" class="btn-add-page" onclick="addPageInput()" style="width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; transition: var(--transition);" title="Add another page">
+                      +
+                    </button>
+                    <button type="button" class="btn-remove-page" onclick="removePageInput(this)" style="width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; display: none; align-items: center; justify-content: center; font-size: 1.5rem; transition: var(--transition);" title="Remove this page">
+                      ×
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="width: 100%;" id="addBtn">
+                START ANALYSIS
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script>
+    // Dashboard Logic
+    const addCompanyForm = document.getElementById('addCompanyForm');
+    const addBtn = document.getElementById('addBtn');
+    let pageInputCount = 1;
+
+    // Add new page input field
+    function addPageInput() {
+      const container = document.getElementById('pagesContainer');
+      const rows = container.querySelectorAll('.page-input-row');
+      
+      // Show remove button on previous row if it exists
+      if (rows.length > 0) {
+        const lastRow = rows[rows.length - 1];
+        const lastRemoveBtn = lastRow.querySelector('.btn-remove-page');
+        if (lastRemoveBtn) {
+          lastRemoveBtn.style.display = 'flex';
+        }
+      }
+      
+      const newRow = document.createElement('div');
+      newRow.className = 'page-input-row';
+      newRow.style.cssText = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;';
+      
+      const input = document.createElement('input');
+      input.type = 'url';
+      input.className = 'input page-url-input';
+      input.placeholder = 'Enter page URL...';
+      input.style.cssText = 'flex: 1;';
+      
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn-add-page';
+      addBtn.innerHTML = '+';
+      addBtn.style.cssText = 'width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; transition: var(--transition);';
+      addBtn.title = 'Add another page';
+      addBtn.onclick = addPageInput;
+      
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'btn-remove-page';
+      removeBtn.innerHTML = '×';
+      removeBtn.style.cssText = 'width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; transition: var(--transition);';
+      removeBtn.title = 'Remove this page';
+      removeBtn.onclick = function() {
+        removePageInput(this);
+      };
+      
+      newRow.appendChild(input);
+      newRow.appendChild(addBtn);
+      newRow.appendChild(removeBtn);
+      container.appendChild(newRow);
+      pageInputCount++;
+    }
+
+    // Remove page input
+    function removePageInput(button) {
+      const row = button.closest('.page-input-row');
+      const container = document.getElementById('pagesContainer');
+      const rows = container.querySelectorAll('.page-input-row');
+      
+      // If removing the last row with remove button, hide remove button on previous row
+      if (rows.length > 1) {
+        row.remove();
+        const remainingRows = container.querySelectorAll('.page-input-row');
+        if (remainingRows.length === 1) {
+          const lastRemoveBtn = remainingRows[0].querySelector('.btn-remove-page');
+          if (lastRemoveBtn) {
+            lastRemoveBtn.style.display = 'none';
+          }
+        }
+      }
+    }
+
+    addCompanyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const websiteUrl = document.getElementById('companyUrl').value.trim();
+      const pageInputs = document.querySelectorAll('.page-url-input');
+      const specificPages = Array.from(pageInputs)
+        .map(input => input.value.trim())
+        .filter(url => url.length > 0);
+
+      // Validate: must have either website URL or at least one specific page
+      if (!websiteUrl && specificPages.length === 0) {
+        alert('Please enter either a website URL or at least one specific page URL.');
+        return;
+      }
+
+      try {
+        addBtn.disabled = true;
+        addBtn.textContent = 'ANALYZING... (This may take a minute)';
+
+        // Determine analysis mode
+        let result;
+        if (websiteUrl && specificPages.length === 0) {
+          // Full website scraping
+          result = await window.api.analyzeWebsite(websiteUrl);
+        } else if (specificPages.length > 0) {
+          // Specific pages only
+          const baseUrl = websiteUrl || new URL(specificPages[0]).origin;
+          result = await window.api.analyzeSpecificPages(baseUrl, specificPages);
+        } else {
+          // Should not reach here due to validation above
+          throw new Error('Invalid input');
+        }
+
+        if (result.success) {
+          // Redirect to the newly created company's messages
+          window.location.href = `company.html?id=${result.companyId}`;
+        } else {
+          alert('Analysis failed: ' + (result.error || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred during analysis. Check console for details.');
+      } finally {
+        addBtn.disabled = false;
+        addBtn.textContent = 'START ANALYSIS';
+      }
+    });
+  </script>
+</body>
+
+</html>

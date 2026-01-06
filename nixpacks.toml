@@ -1,0 +1,18 @@
+# Install Node.js 20 and Chromium
+[phases.setup]
+nixPkgs = ["chromium"]
+aptPkgs = ["curl", "ca-certificates"]
+
+[phases.install]
+cmds = [
+  "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
+  "apt-get install -y nodejs",
+  "node --version",
+  "npm --version",
+  "npm install",
+  "npx playwright install chromium --with-deps"
+]
+
+[start]
+cmd = "npm start"
+

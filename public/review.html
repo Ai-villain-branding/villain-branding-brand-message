@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Messages | Villain Branding</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        /* Page specific overrides */
+        .review-layout {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+            margin-top: 8rem;
+            /* Space for header */
+            margin-bottom: 4rem;
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 8rem;
+            height: fit-content;
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+        }
+
+        .filter-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .filter-title {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 1rem;
+            color: var(--text-muted);
+        }
+
+        .filter-option {
+            display: block;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .filter-option:hover {
+            color: var(--text-primary);
+        }
+
+        .message-grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .message-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .message-card:hover {
+            border-color: var(--text-muted);
+        }
+
+        .message-card.selected {
+            border-color: var(--accent);
+            background: rgba(212, 175, 55, 0.05);
+        }
+
+        .message-text {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            padding-right: 2rem;
+        }
+
+        .message-meta {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            padding-top: 1rem;
+            margin-top: 1rem;
+        }
+
+        .checkbox-wrapper {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+        }
+
+        .summary-panel {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="container nav-container">
+            <div class="logo">
+                VILLAIN <span>BRANDING™</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="review-layout">
+            <aside class="sidebar">
+                <div class="filter-group">
+                    <h3 class="filter-title">Categories</h3>
+                    <div id="categoryFilters">
+                        <!-- Filters injected by JS -->
+                    </div>
+                </div>
+
+                <div class="summary-panel">
+                    <h3 class="filter-title">Summary</h3>
+                    <div class="stat-row">
+                        <span>Selected:</span>
+                        <span id="selectedCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Est. Time:</span>
+                        <span id="estTime">0s</span>
+                    </div>
+
+                    <button id="generateBtn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;" disabled>
+                        GENERATE EVIDENCES
+                    </button>
+                </div>
+            </aside>
+
+            <main>
+                <div class="flex justify-between items-center mb-2">
+                    <h2>Review Messages</h2>
+                    <div class="flex gap-2">
+                        <button id="selectAllBtn" class="btn" style="font-size: 0.8rem; padding: 0.5rem 1rem;">Select
+                            All</button>
+                        <button id="deselectAllBtn" class="btn"
+                            style="font-size: 0.8rem; padding: 0.5rem 1rem;">Deselect All</button>
+                    </div>
+                </div>
+
+                <div id="loadingState" class="text-center" style="padding: 4rem;">
+                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                    <p>Loading analysis results...</p>
+                </div>
+
+                <div id="messagesList" class="message-grid hidden">
+                    <!-- Messages injected by JS -->
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        // Page logic
+        const urlParams = new URLSearchParams(window.location.search);
+        const analysisId = urlParams.get('id');
+
+        if (!analysisId) {
+            window.location.href = 'index.html';
+        }
+
+        let allMessages = [];
+        let selectedMessages = new Set();
+
+        async function init() {
+            try {
+                const data = await App.getMessages(analysisId);
+                allMessages = data.messages;
+                renderFilters(data.categoryCounts);
+                renderMessages(allMessages);
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('messagesList').classList.remove('hidden');
+            } catch (error) {
+                console.error('Error loading messages:', error);
+                document.getElementById('loadingState').innerHTML = `<p style="color: #ef4444">Error loading messages. Please try again.</p>`;
+            }
+        }
+
+        function renderFilters(counts) {
+            const container = document.getElementById('categoryFilters');
+            container.innerHTML = `
+        <label class="filter-option">
+          <input type="radio" name="category" value="all" checked onchange="filterMessages('all')"> 
+          All Messages (${allMessages.length})
+        </label>
+      `;
+
+            for (const [cat, count] of Object.entries(counts)) {
+                if (count > 0) {
+                    container.innerHTML += `
+            <label class="filter-option">
+              <input type="radio" name="category" value="${cat}" onchange="filterMessages('${cat}')"> 
+              ${cat.replace(/_/g, ' ')} (${count})
+            </label>
+          `;
+                }
+            }
+        }
+
+        function renderMessages(messages) {
+            const container = document.getElementById('messagesList');
+            container.innerHTML = messages.map(msg => `
+        <div class="message-card ${selectedMessages.has(msg.id) ? 'selected' : ''}" onclick="toggleSelection('${msg.id}')">
+          <div class="checkbox-wrapper">
+            <input type="checkbox" ${selectedMessages.has(msg.id) ? 'checked' : ''}>
+          </div>
+          <div class="message-text">"${msg.text}"</div>
+          <div class="message-meta">
+            <span class="badge badge-secondary">${msg.category.replace(/_/g, ' ')}</span>
+            <span>${msg.wordCount} words</span>
+            <span>Found on ${msg.urls.length} pages</span>
+          </div>
+        </div>
+      `).join('');
+
+            updateSummary();
+        }
+
+        window.filterMessages = (category) => {
+            const filtered = category === 'all'
+                ? allMessages
+                : allMessages.filter(m => m.category === category);
+            renderMessages(filtered);
+        };
+
+        window.toggleSelection = (id) => {
+            if (selectedMessages.has(id)) {
+                selectedMessages.delete(id);
+            } else {
+                selectedMessages.add(id);
+            }
+            renderMessages(allMessages.filter(m => {
+                const activeFilter = document.querySelector('input[name="category"]:checked').value;
+                return activeFilter === 'all' || m.category === activeFilter;
+            }));
+        };
+
+        function updateSummary() {
+            const count = selectedMessages.size;
+            document.getElementById('selectedCount').textContent = count;
+            document.getElementById('estTime').textContent = `~${count * 2}s`;
+            document.getElementById('generateBtn').disabled = count === 0;
+        }
+
+        document.getElementById('selectAllBtn').onclick = () => {
+            allMessages.forEach(m => selectedMessages.add(m.id));
+            renderMessages(allMessages);
+        };
+
+        document.getElementById('deselectAllBtn').onclick = () => {
+            selectedMessages.clear();
+            renderMessages(allMessages);
+        };
+
+        document.getElementById('generateBtn').onclick = async () => {
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            btn.textContent = 'STARTING...';
+
+            try {
+                const job = await App.generateScreenshots(analysisId, Array.from(selectedMessages));
+                window.location.href = `gallery.html?jobId=${job.jobId}`;
+            } catch (error) {
+                console.error('Error:', error);
+                btn.textContent = 'ERROR';
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = 'GENERATE EVIDENCES';
+                }, 2000);
+            }
+        };
+
+        init();
+    </script>
+</body>
+
+</html>
