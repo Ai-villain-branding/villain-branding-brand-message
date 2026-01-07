@@ -27,10 +27,13 @@ const axios = require('axios');
 const { runAnalysisWorkflow } = require('./services/workflow');
 const ScreenshotService = require('./services/screenshotService');
 const screenshotService = new ScreenshotService();
+const StandaloneScreenshotService = require('./services/standaloneScreenshotService');
+const standaloneScreenshotService = new StandaloneScreenshotService();
 const { captureScreenshot } = require('./services/scrappeyScreenshot');
 const supabase = require('./services/supabase');
 const config = require('./config');
 const googleDriveService = require('./services/googleDrive');
+const { saveHtmlEvidence, getHtmlEvidence } = require('./storage');
 
 const app = express();
 const PORT = config.port || 3000;
@@ -259,13 +262,28 @@ app.post('/api/screenshot', async (req, res) => {
     const { companyId, messageId, url, text } = req.body;
 
     try {
-        // 1. Try Playwright first (primary method)
+        // 1. Try Playwright first (primary method - complex with extensions)
         let result = await screenshotService.captureMessage(url, text, messageId);
         let screenshotSource = 'playwright';
 
-        // 2. If Playwright fails, fall back to Scrappey
+        // 2. If 1st attempt fails, try standalone Playwright (simpler, no extensions)
         if (!result) {
-            console.log(`[Screenshot] Playwright failed for ${url}, trying Scrappey fallback...`);
+            console.log(`[Screenshot] 1st attempt (Playwright with extensions) failed for ${url}, trying 2nd attempt (standalone Playwright)...`);
+            try {
+                result = await standaloneScreenshotService.captureMessage(url, text, messageId);
+                if (result) {
+                    screenshotSource = 'standalone-playwright';
+                    console.log(`[Screenshot] 2nd attempt (standalone Playwright) succeeded for ${url}`);
+                }
+            } catch (standaloneError) {
+                console.error(`[Screenshot] 2nd attempt (standalone Playwright) failed for ${url}:`, standaloneError.message);
+                result = null;
+            }
+        }
+
+        // 3. If 2nd attempt fails, fall back to Scrappey (paid service)
+        if (!result) {
+            console.log(`[Screenshot] Both Playwright attempts failed for ${url}, trying 3rd attempt (Scrappey)...`);
             try {
                 const scrappeyResult = await captureScreenshot({
                     url: url,
@@ -316,15 +334,16 @@ app.post('/api/screenshot', async (req, res) => {
                     publicUrl: publicUrl // Store public URL if available
                 };
                 screenshotSource = 'scrappey';
+                console.log(`[Screenshot] 3rd attempt (Scrappey) succeeded for ${url}`);
             } catch (scrappeyError) {
-                console.error(`[Screenshot] Scrappey fallback also failed for ${url}:`, scrappeyError.message);
-                // Both methods failed - continue to failure handling below
+                console.error(`[Screenshot] 3rd attempt (Scrappey) also failed for ${url}:`, scrappeyError.message);
+                // All three methods failed - continue to failure handling below
                 result = null;
             }
         }
 
         if (!result) {
-            // Both Playwright and Scrappey failed
+            // All three attempts failed (Playwright with extensions, standalone Playwright, and Scrappey)
             // Store failed attempt in database so it shows up in proofs page
             const { data: failedScreenshot, error: insertError } = await supabase
                 .from('screenshots')
@@ -343,7 +362,7 @@ app.post('/api/screenshot', async (req, res) => {
             return res.status(404).json({ 
                 success: false,
                 error: 'Screenshot capture failed',
-                details: `Could not capture screenshot of page ${url}. Both Playwright and Scrappey methods failed.`,
+                details: `Could not capture screenshot of page ${url}. All three methods failed (Playwright with extensions, standalone Playwright, and Scrappey).`,
                 screenshot: failedScreenshot // Return the failed record
             });
         }
@@ -351,6 +370,12 @@ app.post('/api/screenshot', async (req, res) => {
         // Handle different result formats
         let imageBuffer = result.buffer;
         let scrappeyPublicUrl = result.publicUrl; // May be set if Scrappey provided a public URL
+        let htmlEvidencePath = result.htmlEvidencePath || (result.metadata && result.metadata.htmlEvidencePath) || null;
+
+        // Log HTML evidence if available
+        if (htmlEvidencePath) {
+            console.log(`[Evidence] HTML evidence linked to screenshot: ${htmlEvidencePath}`);
+        }
 
         // 2. Upload to Supabase Storage (always upload to Supabase, even if Scrappey provided a public URL)
         let publicUrl;
@@ -390,18 +415,59 @@ app.post('/api/screenshot', async (req, res) => {
         }
 
         // 3. Save Record in DB
-        const { data: screenshotRecord, error: dbError } = await supabase
+        const screenshotData = {
+            company_id: companyId,
+            message_id: messageId,
+            image_url: publicUrl,
+            original_url: url,
+            message_content: text,
+            status: 'success' // Track status
+        };
+
+        // If HTML evidence path exists, try to include it in the database record
+        // Gracefully handle if the column doesn't exist (migration not run)
+        if (htmlEvidencePath) {
+            screenshotData.html_evidence_path = htmlEvidencePath;
+            console.log(`[Evidence] Screenshot ${companyId}/${messageId} has HTML evidence at: ${htmlEvidencePath}`);
+        }
+
+        let screenshotRecord;
+        let dbError;
+        
+        // Try to insert with html_evidence_path if provided
+        const { data, error } = await supabase
             .from('screenshots')
-            .insert({
-                company_id: companyId,
-                message_id: messageId,
-                image_url: publicUrl,
-                original_url: url,
-                message_content: text,
-                status: 'success' // Track status
-            })
+            .insert(screenshotData)
             .select()
             .single();
+
+        if (error) {
+            // If error is due to missing column, retry without html_evidence_path
+            if (htmlEvidencePath && (
+                (error.message?.includes('column') && error.message?.includes('html_evidence_path')) ||
+                error.code === '42703' || // PostgreSQL undefined column error
+                error.message?.includes('does not exist')
+            )) {
+                console.warn('[Evidence] html_evidence_path column not found, inserting without it');
+                // Remove html_evidence_path and retry
+                const { html_evidence_path, ...dataWithoutEvidence } = screenshotData;
+                const { data: retryData, error: retryError } = await supabase
+                    .from('screenshots')
+                    .insert(dataWithoutEvidence)
+                    .select()
+                    .single();
+                
+                if (retryError) {
+                    dbError = retryError;
+                } else {
+                    screenshotRecord = retryData;
+                }
+            } else {
+                dbError = error;
+            }
+        } else {
+            screenshotRecord = data;
+        }
 
         if (dbError) throw dbError;
 
@@ -467,6 +533,61 @@ app.post('/api/screenshot', async (req, res) => {
     } catch (error) {
         console.error('Screenshot failed:', error);
         res.status(500).json({ error: 'Screenshot generation failed' });
+    }
+});
+
+// 4a. Receive HTML Evidence from CloudFlare Bypass Extension
+app.post('/api/evidence/html', async (req, res) => {
+    const { url, html, timestamp, tabId } = req.body;
+
+    try {
+        // Validate required parameters
+        if (!url || !html) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'URL and HTML content are required',
+                details: 'Please provide both url and html in the request body'
+            });
+        }
+
+        // Validate URL format
+        try {
+            new URL(url);
+        } catch (e) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'Invalid URL format',
+                details: e.message
+            });
+        }
+
+        console.log(`[Evidence] Receiving HTML evidence for ${url}...`);
+
+        // Save HTML evidence
+        const evidenceResult = await saveHtmlEvidence(html, url, {
+            timestamp: timestamp || new Date().toISOString(),
+            tabId: tabId,
+            source: 'cloudflare-bypass-extension'
+        });
+
+        console.log(`[Evidence] HTML evidence saved: ${evidenceResult.relativePath}`);
+
+        // Return success response with file path
+        res.json({
+            success: true,
+            filePath: evidenceResult.filePath,
+            relativePath: evidenceResult.relativePath,
+            filename: evidenceResult.filename,
+            metadata: evidenceResult.metadata
+        });
+
+    } catch (error) {
+        console.error('[Evidence] Error saving HTML evidence:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to save HTML evidence', 
+            details: error.message 
+        });
     }
 });
 
@@ -961,6 +1082,35 @@ app.delete('/api/screenshot/:id', async (req, res) => {
         console.error('Delete screenshot failed:', error);
         res.status(500).json({ error: 'Failed to delete screenshot', details: error.message });
     }
+});
+
+// Health check endpoint
+app.get('/api/health', async (req, res) => {
+    const health = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        services: {}
+    };
+
+    // Check Supabase connection
+    try {
+        const { error } = await supabase.from('companies').select('id').limit(1);
+        health.services.supabase = error ? 'error' : 'ok';
+        if (error) health.services.supabase_error = error.message;
+    } catch (err) {
+        health.services.supabase = 'error';
+        health.services.supabase_error = err.message;
+    }
+
+    // Check OpenAI API key
+    health.services.openai = config.openaiApiKey ? 'configured' : 'missing';
+
+    // Check optional services
+    health.services.scrappey = config.scrappeyApiKey ? 'configured' : 'optional';
+    health.services.googleDrive = config.googleDriveClientId ? 'configured' : 'optional';
+
+    const allCriticalOk = health.services.supabase === 'ok' && health.services.openai === 'configured';
+    res.status(allCriticalOk ? 200 : 503).json(health);
 });
 
 app.listen(PORT, () => {

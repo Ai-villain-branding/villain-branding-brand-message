@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Screenshot Stabilizer",
+  "name": "CloudFlare Bypass",
   "version": "1.0.0",
-  "description": "Stabilizes DOM rendering and ensures full UI visibility for screenshot capture",
+  "description": "Bypasses Cloudflare challenges and sends HTML to backend for evidence capture",
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "webRequest"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -14,7 +15,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_start",
+      "run_at": "document_idle",
       "all_frames": false
     }
   ],
@@ -22,8 +23,4 @@
     "service_worker": "background.js"
   }
 }
-
-
-
-
 

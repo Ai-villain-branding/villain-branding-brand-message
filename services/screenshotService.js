@@ -5,48 +5,89 @@ const fs = require('fs');
 
 class ScreenshotService {
     constructor() {
-        this.browser = null;
+        this.browserContext = null;
         this.minWidth = 800;
         this.minHeight = 600;
         this.defaultWidth = parseInt(process.env.SCREENSHOT_WIDTH) || 1440;
         this.defaultHeight = parseInt(process.env.SCREENSHOT_HEIGHT) || 900;
+        // Use unique directory per instance to avoid singleton lock conflicts
+        this.userDataDir = process.env.PLAYWRIGHT_USER_DATA_DIR || `/tmp/playwright-user-data-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+        // CloudFlare bypass configuration
+        this.cloudflareExtensionEnabled = process.env.CLOUDFLARE_EXTENSION_ENABLED !== 'false';
+        this.cloudflareBypassTimeout = parseInt(process.env.CLOUDFLARE_BYPASS_TIMEOUT) || 180000; // 3 minutes default
+        // Store HTML evidence paths for linking with screenshots
+        this.htmlEvidenceCache = new Map(); // url -> { filePath, timestamp }
     }
 
-    // Initialize browser
+    // Initialize browser with persistent context (following the provided code snippet pattern)
     async init() {
         try {
-            // Check if browser exists and is connected
-            if (this.browser) {
+            // Check if browser context exists and is connected
+            if (this.browserContext) {
                 try {
-                    // Try to get browser version to check if it's still alive
-                    await this.browser.version();
-                    return; // Browser is alive, no need to recreate
+                    // Try to get pages to check if context is still alive
+                    const pages = this.browserContext.pages();
+                    // Context is alive, no need to recreate
+                    return;
                 } catch (e) {
-                    // Browser is dead, need to recreate
-                    console.warn('Browser connection lost, recreating...');
-                    this.browser = null;
+                    // Context is dead, need to recreate
+                    console.warn('Browser context connection lost, recreating...');
+                    this.browserContext = null;
+                    // Generate new unique directory to avoid lock conflicts
+                    this.userDataDir = `/tmp/playwright-user-data-${Date.now()}-${Math.random().toString(36).substring(7)}`;
                 }
             }
 
-            // Get absolute path to chrome extension directory
-            const extensionPath = path.resolve(__dirname, '..', 'chrome-extension');
+            // Get absolute path to chrome extension directory (screenshot stabilizer only)
+            const pathToExtension = path.resolve(__dirname, '..', 'chrome-extension');
             
             // Verify extension directory exists
-            if (!fs.existsSync(extensionPath)) {
-                console.warn(`Chrome extension directory not found at ${extensionPath}, will use direct script injection instead`);
+            if (!fs.existsSync(pathToExtension)) {
+                console.warn(`Chrome extension directory not found at ${pathToExtension}, will use direct script injection instead`);
+            }
+            
+            // Build extension loading arguments (only stabilizer extension for 1st attempt)
+            const extensionArgs = [];
+            
+            if (fs.existsSync(pathToExtension)) {
+                extensionArgs.push(
+                    `--disable-extensions-except=${pathToExtension}`,
+                    `--load-extension=${pathToExtension}`
+                );
             }
 
-            // Launch new browser with resource limits for Railway and Chrome extension loaded
-            // Note: Extensions may not work in headless mode, so we'll also inject the script directly
-            this.browser = await chromium.launch({
+            // Clean up user data directory completely to avoid singleton lock conflicts
+            // This ensures a fresh start each time
+            if (fs.existsSync(this.userDataDir)) {
+                try {
+                    // Remove all files and subdirectories recursively
+                    fs.rmSync(this.userDataDir, { recursive: true, force: true });
+                    console.log('Cleaned up existing user data directory');
+                } catch (cleanupError) {
+                    console.warn('Could not clean up user data directory, using new unique directory:', cleanupError.message);
+                    // Use a new unique directory if cleanup fails
+                    this.userDataDir = `/tmp/playwright-user-data-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+                }
+            }
+
+            // Ensure user data directory exists (fresh and clean)
+            if (!fs.existsSync(this.userDataDir)) {
+                fs.mkdirSync(this.userDataDir, { recursive: true });
+            }
+
+            // Launch persistent context with Chrome extension loaded (strictly following snippet)
+            this.browserContext = await chromium.launchPersistentContext(this.userDataDir, {
+                channel: 'chromium',
                 headless: true,
+                viewport: { width: this.defaultWidth, height: this.defaultHeight },
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage', // Use /tmp instead of /dev/shm
+                    '--disable-dev-shm-usage',
                     '--disable-gpu',
                     '--disable-software-rasterizer',
-                    ...(fs.existsSync(extensionPath) ? [`--load-extension=${extensionPath}`] : []), // Load Chrome extension if it exists
+                    ...extensionArgs, // Include extension loading args
                     '--disable-background-networking',
                     '--disable-background-timer-throttling',
                     '--disable-backgrounding-occluded-windows',
@@ -54,33 +95,115 @@ class ScreenshotService {
                     '--disable-features=TranslateUI',
                     '--disable-ipc-flooding-protection',
                 ],
-                timeout: 30000 // 30 second timeout
+                timeout: 30000
             });
+
+            // Wait for service worker exactly as shown in the snippet
+            let [serviceWorker] = this.browserContext.serviceWorkers();
+            if (!serviceWorker) {
+                try {
+                    serviceWorker = await this.browserContext.waitForEvent('serviceworker', { timeout: 10000 });
+                } catch (swTimeoutError) {
+                    // Service worker may not load in headless mode or extension may not have one
+                    console.warn('Service worker did not initialize within timeout, continuing anyway');
+                }
+            }
+
+            if (serviceWorker) {
+                const serviceWorkers = this.browserContext.serviceWorkers();
+                console.log(`Service worker initialized. Active service workers: ${serviceWorkers.length}`);
+            }
+
         } catch (error) {
-            console.error('Failed to initialize browser:', error);
-            // Reset browser to null so next attempt will try again
-            this.browser = null;
+            console.error('Failed to initialize browser context:', error);
+            // Reset context to null so next attempt will try again
+            this.browserContext = null;
             throw error;
         }
     }
 
-    // Close browser
+    // Close browser context
     async close() {
-        if (this.browser) {
-            await this.browser.close();
-            this.browser = null;
+        if (this.browserContext) {
+            await this.browserContext.close();
+            this.browserContext = null;
+            
+            // Clean up user data directory after closing
+            if (this.userDataDir && fs.existsSync(this.userDataDir)) {
+                try {
+                    fs.rmSync(this.userDataDir, { recursive: true, force: true });
+                    console.log('Cleaned up user data directory after close');
+                } catch (cleanupError) {
+                    console.warn('Could not clean up user data directory:', cleanupError.message);
+                }
+            }
+        }
+    }
+
+    // Detect if the page is showing a Cloudflare challenge
+    async detectCloudflareChallenge(page) {
+        try {
+            const isCloudflare = await page.evaluate(() => {
+                const bodyText = (document.body?.innerText || document.body?.textContent || '').toLowerCase();
+                const title = (document.title || '').toLowerCase();
+                const html = document.documentElement.innerHTML.toLowerCase();
+                
+                // Cloudflare challenge indicators
+                const cloudflarePatterns = [
+                    'checking your browser',
+                    'just a moment',
+                    'please wait',
+                    'cf-browser-verification',
+                    'cf-wrapper',
+                    'cloudflare'
+                ];
+                
+                // Check for Cloudflare-specific text
+                for (const pattern of cloudflarePatterns) {
+                    if (bodyText.includes(pattern) || title.includes(pattern) || html.includes(pattern)) {
+                        // Check for Cloudflare-specific DOM elements
+                        const cfWrapper = document.getElementById('cf-wrapper') || 
+                                       document.querySelector('.cf-wrapper') ||
+                                       document.querySelector('[class*="cf-"]') ||
+                                       document.querySelector('[id*="cf-"]');
+                        
+                        if (cfWrapper) {
+                            return true;
+                        }
+                    }
+                }
+                
+                // Check for Cloudflare ray ID in response (if available via meta tags or comments)
+                const cfRayMatch = html.match(/cf-ray[:\s]+([a-z0-9-]+)/i);
+                if (cfRayMatch) {
+                    return true;
+                }
+                
+                return false;
+            });
+            
+            return isCloudflare;
+        } catch (error) {
+            // If detection fails, assume it's not a Cloudflare challenge
+            return false;
         }
     }
 
     // Detect if the page is an error/blocked page
     async detectErrorPage(page) {
         try {
+            // First check if it's a Cloudflare challenge (more specific)
+            const isCloudflare = await this.detectCloudflareChallenge(page);
+            if (isCloudflare) {
+                return true; // Cloudflare challenge is considered an error/blocked state
+            }
+
             const errorIndicators = await page.evaluate(() => {
                 const bodyText = (document.body.innerText || document.body.textContent || '').toLowerCase();
                 const title = (document.title || '').toLowerCase();
                 const url = window.location.href.toLowerCase();
                 
-                // Common error page indicators
+                // Common error page indicators (excluding Cloudflare-specific ones)
                 const errorPatterns = [
                     'access denied',
                     'access forbidden',
@@ -91,13 +214,10 @@ class ScreenshotService {
                     'unauthorized',
                     'blocked',
                     'you don\'t have permission',
-                    'reference #', // Cloudflare error pages
+                    'reference #', // Generic error pages
                     'errors.edgesuite.net', // Akamai error pages
-                    'cloudflare',
                     'this site can\'t be reached',
                     'err_',
-                    'cf-ray',
-                    'checking your browser',
                 ];
                 
                 // Check title, body text, and URL for error indicators
@@ -743,33 +863,351 @@ class ScreenshotService {
         }
     }
 
-    // Capture screenshot for a single message on a page
-    async captureMessage(url, messageText, messageId, retries = 2) {
-        let context = null;
+    // Wait for CloudFlare bypass extension to complete and send HTML
+    async waitForCloudflareBypass(page, url, timeout = null) {
+        const maxWaitTime = timeout || this.cloudflareBypassTimeout;
+        const startTime = Date.now();
+        const checkInterval = 1000; // Check every second
+
+        console.log(`[CloudFlare Bypass] Waiting for extension to solve challenge for ${url}...`);
+
+        while (Date.now() - startTime < maxWaitTime) {
+            try {
+                // Check if extension has completed bypass
+                const bypassStatus = await page.evaluate(() => {
+                    return {
+                        isComplete: window.cloudflareBypassComplete === true,
+                        result: window.cloudflareBypassResult || null,
+                        status: window.cloudflareBypassStatus ? {
+                            isComplete: window.cloudflareBypassStatus.isComplete(),
+                            getResult: window.cloudflareBypassStatus.getResult()
+                        } : null
+                    };
+                });
+
+                if (bypassStatus.isComplete || (bypassStatus.status && bypassStatus.status.isComplete())) {
+                    const result = bypassStatus.result || (bypassStatus.status ? bypassStatus.status.getResult() : null);
+                    console.log(`[CloudFlare Bypass] Challenge solved, HTML sent to backend`);
+                    
+                    // Store HTML evidence path in cache for later linking
+                    if (result && result.relativePath) {
+                        this.htmlEvidenceCache.set(url, {
+                            filePath: result.relativePath,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                    
+                    return result;
+                }
+
+                // Check if challenge is still present
+                const isStillChallenge = await this.detectCloudflareChallenge(page);
+                if (!isStillChallenge) {
+                    // Challenge appears to be solved, but extension hasn't sent HTML yet
+                    // Wait a bit more for extension to send
+                    await page.waitForTimeout(2000);
+                    const finalCheck = await page.evaluate(() => {
+                        return window.cloudflareBypassComplete === true;
+                    });
+                    
+                    if (finalCheck) {
+                        const result = await page.evaluate(() => window.cloudflareBypassResult || null);
+                        if (result && result.relativePath) {
+                            this.htmlEvidenceCache.set(url, {
+                                filePath: result.relativePath,
+                                timestamp: new Date().toISOString()
+                            });
+                        }
+                        return result;
+                    }
+                }
+
+                await page.waitForTimeout(checkInterval);
+            } catch (error) {
+                console.warn(`[CloudFlare Bypass] Error checking bypass status: ${error.message}`);
+                await page.waitForTimeout(checkInterval);
+            }
+        }
+
+        console.warn(`[CloudFlare Bypass] Timeout waiting for bypass completion (${maxWaitTime}ms)`);
+        return null;
+    }
+
+    // Capture screenshot with CloudFlare bypass
+    async captureWithCloudflareBypass(url, messageText, messageId, retries = 2) {
         let page = null;
+        let htmlEvidencePath = null;
 
         try {
-            // Initialize browser with retry
+            // Initialize browser context with retry
             for (let i = 0; i < 3; i++) {
                 try {
                     await this.init();
                     break;
                 } catch (initError) {
                     if (i === 2) throw initError;
-                    console.warn(`Browser init failed, retrying... (${i + 1}/3)`);
+                    console.warn(`Browser context init failed, retrying... (${i + 1}/3)`);
                     await new Promise(resolve => setTimeout(resolve, 1000));
-                    this.browser = null; // Force recreation
+                    this.browserContext = null;
                 }
             }
 
-            // Create context with timeout
-            context = await this.browser.newContext({
-                viewport: { width: this.defaultWidth, height: this.defaultHeight },
-                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            // Create page
+            page = await this.browserContext.newPage({
                 timeout: 30000
             });
 
-            page = await context.newPage({
+            // Inject stabilizer script before navigation
+            await this.injectStabilizerScript(page);
+
+            // Navigate to URL - extension will handle Cloudflare challenge
+            console.log(`[CloudFlare Bypass] Navigating to ${url} with bypass extension...`);
+            try {
+                await page.goto(url, {
+                    waitUntil: 'load',
+                    timeout: 60000
+                });
+            } catch (timeoutError) {
+                console.warn(`[CloudFlare Bypass] Load timeout for ${url}, trying domcontentloaded...`);
+                await page.goto(url, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 60000
+                });
+            }
+
+            // Wait for CloudFlare extension to solve challenge and send HTML
+            const bypassResult = await this.waitForCloudflareBypass(page, url);
+            if (bypassResult && bypassResult.relativePath) {
+                htmlEvidencePath = bypassResult.relativePath;
+                console.log(`[CloudFlare Bypass] HTML evidence saved: ${htmlEvidencePath}`);
+            } else {
+                console.warn(`[CloudFlare Bypass] HTML evidence not received, continuing with screenshot anyway`);
+            }
+
+            // Wait for extension/script to be ready and stabilize the page
+            await this.waitForExtensionReady(page);
+
+            // Wait a bit for any animations and dynamic content
+            await page.waitForTimeout(2000);
+
+            // Check if page is still an error/blocked page (should be solved by now)
+            const isErrorPage = await this.detectErrorPage(page);
+            if (isErrorPage) {
+                const isCloudflare = await this.detectCloudflareChallenge(page);
+                if (isCloudflare) {
+                    throw new Error(`Cloudflare challenge was not solved within timeout. Page may still be blocked.`);
+                }
+                
+                const errorDetails = await page.evaluate(() => {
+                    const bodyText = document.body.innerText || document.body.textContent || '';
+                    const title = document.title || '';
+                    return { bodyText: bodyText.substring(0, 200), title };
+                }).catch(() => ({ bodyText: '', title: '' }));
+                
+                throw new Error(`Page is blocked or inaccessible. Error: ${errorDetails.title || 'Access Denied'}. ${errorDetails.bodyText.substring(0, 100)}`);
+            }
+
+            // Close any popups, modals, or cookie banners
+            await this.closePopups(page);
+
+            // Scroll page to reveal content
+            await this.scrollPageToRevealContent(page);
+
+            // Wait for dynamic content to load after scrolling
+            await page.waitForTimeout(1500);
+
+            // Wait for network to be idle
+            try {
+                await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+            } catch (e) {
+                // Ignore timeout
+            }
+
+            // Find element containing the message (same logic as standard capture)
+            let element = await this.findElementWithText(page, messageText);
+            
+            // If not found, try scrolling and searching again
+            if (!element) {
+                console.log('Text not found on initial search, trying with page scroll...');
+                await this.scrollPageToRevealContent(page);
+                await page.waitForTimeout(2000);
+                await page.evaluate(() => {
+                    window.dispatchEvent(new Event('scroll'));
+                });
+                await page.waitForTimeout(1000);
+                element = await this.findElementWithText(page, messageText);
+            }
+            
+            // If still not found, try partial matches
+            if (!element) {
+                console.log('Full text not found, trying partial matches...');
+                const partialLengths = [50, 40, 30, 20];
+                for (const len of partialLengths) {
+                    if (messageText.length > len) {
+                        const partialText = messageText.substring(0, len).trim();
+                        element = await this.findElementWithText(page, partialText);
+                        if (element) {
+                            console.log(`Found partial match (first ${len} chars): "${partialText}"`);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // If still not found, try key phrases
+            if (!element) {
+                console.log('Trying to find key phrases from the text...');
+                const words = messageText.split(/\s+/).filter(w => w.length >= 4);
+                if (words.length > 0) {
+                    element = await this.findElementWithText(page, words[0]);
+                    if (!element && words.length > 1) {
+                        const phrase = words.slice(0, Math.min(3, words.length)).join(' ');
+                        element = await this.findElementWithText(page, phrase);
+                    }
+                }
+            }
+
+            // Last resort: try to find main content area
+            if (!element) {
+                const isErrorPage = await this.detectErrorPage(page);
+                if (isErrorPage) {
+                    throw new Error(`Page appears to be blocked or inaccessible. Cannot capture screenshot.`);
+                }
+                
+                try {
+                    const fallbackElement = await page.evaluateHandle(() => {
+                        const mainContent = document.querySelector('main, article, [role="main"]') || 
+                                          document.querySelector('.content, .main-content, #content, #main');
+                        if (mainContent) {
+                            return mainContent;
+                        }
+                        return document.body;
+                    });
+                    
+                    if (fallbackElement && fallbackElement.asElement()) {
+                        console.log('Using fallback: capturing main content area');
+                        element = fallbackElement.asElement();
+                    }
+                } catch (e) {
+                    // Ignore fallback errors
+                }
+            }
+
+            if (!element) {
+                throw new Error(`Could not find text "${messageText}" on page`);
+            }
+
+            // Scroll element into view
+            try {
+                const isVisible = await element.isVisible().catch(() => false);
+                if (!isVisible) {
+                    const box = await element.boundingBox().catch(() => null);
+                    if (box) {
+                        await page.evaluate(({ x, y }) => {
+                            window.scrollTo(x, y - 100);
+                        }, box);
+                        await page.waitForTimeout(500);
+                    } else {
+                        await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                        await page.waitForTimeout(500);
+                    }
+                } else {
+                    await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                    await page.waitForTimeout(500);
+                }
+            } catch (scrollError) {
+                try {
+                    const box = await element.boundingBox().catch(() => null);
+                    if (box) {
+                        await page.evaluate(({ x, y }) => {
+                            window.scrollTo(x, y - 100);
+                        }, box);
+                        await page.waitForTimeout(500);
+                    }
+                } catch (manualScrollError) {
+                    console.warn('Could not scroll element into view, continuing anyway');
+                }
+            }
+
+            // Highlight the element
+            await this.highlightElement(element);
+
+            // Get viewport dimensions
+            const viewport = page.viewportSize();
+
+            // Capture screenshot
+            const screenshotBuffer = await page.screenshot({
+                type: 'png',
+                fullPage: false
+            });
+
+            const screenshotId = uuidv4();
+            const metadata = {
+                id: screenshotId,
+                messageId: messageId,
+                messageText: messageText,
+                url: url,
+                dimensions: {
+                    width: viewport.width,
+                    height: viewport.height
+                },
+                capturedAt: new Date().toISOString(),
+                htmlEvidencePath: htmlEvidencePath, // Include HTML evidence path
+                cloudflareBypass: true
+            };
+
+            return {
+                id: screenshotId,
+                buffer: screenshotBuffer,
+                metadata: metadata,
+                htmlEvidencePath: htmlEvidencePath
+            };
+
+        } catch (error) {
+            console.error(`[CloudFlare Bypass] Error capturing screenshot for "${messageText}" at ${url}:`, error.message);
+            
+            // If browser context crashed, reset and retry
+            if ((error.message.includes('Target page, context or browser has been closed') ||
+                 error.message.includes('browser has been closed') ||
+                 error.message.includes('Browser closed') ||
+                 error.message.includes('Context closed')) && retries > 0) {
+                console.warn('Browser context crashed, resetting and retrying...');
+                this.browserContext = null;
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return this.captureWithCloudflareBypass(url, messageText, messageId, retries - 1);
+            }
+            
+            return null;
+        } finally {
+            try {
+                if (page) await page.close().catch(() => {});
+            } catch (e) {
+                console.warn('Error closing page:', e.message);
+            }
+        }
+    }
+
+    // Capture screenshot for a single message on a page
+    async captureMessage(url, messageText, messageId, retries = 2) {
+        let page = null;
+
+        try {
+            // Initialize browser context with retry
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await this.init();
+                    break;
+                } catch (initError) {
+                    if (i === 2) throw initError;
+                    console.warn(`Browser context init failed, retrying... (${i + 1}/3)`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    this.browserContext = null; // Force recreation
+                }
+            }
+
+            // Create page directly from persistent context
+            // Persistent context already has viewport and user agent configured
+            page = await this.browserContext.newPage({
                 timeout: 30000
             });
 
@@ -990,6 +1428,10 @@ class ScreenshotService {
             });
 
             const screenshotId = uuidv4();
+            
+            // Check if HTML evidence exists for this URL (from CloudFlare bypass cache)
+            const htmlEvidence = this.htmlEvidenceCache.get(url);
+            
             const metadata = {
                 id: screenshotId,
                 messageId: messageId,
@@ -999,24 +1441,27 @@ class ScreenshotService {
                     width: viewport.width,
                     height: viewport.height
                 },
-                capturedAt: new Date().toISOString()
+                capturedAt: new Date().toISOString(),
+                htmlEvidencePath: htmlEvidence ? htmlEvidence.filePath : null
             };
 
             return {
                 id: screenshotId,
                 buffer: screenshotBuffer,
-                metadata: metadata
+                metadata: metadata,
+                htmlEvidencePath: htmlEvidence ? htmlEvidence.filePath : null
             };
 
         } catch (error) {
             console.error(`Error capturing screenshot for "${messageText}" at ${url}:`, error.message);
             
-            // If browser crashed, reset it and retry once
+            // If browser context crashed, reset it and retry once
             if ((error.message.includes('Target page, context or browser has been closed') ||
                  error.message.includes('browser has been closed') ||
-                 error.message.includes('Browser closed')) && retries > 0) {
-                console.warn('Browser crashed, resetting and retrying...');
-                this.browser = null; // Force browser recreation
+                 error.message.includes('Browser closed') ||
+                 error.message.includes('Context closed')) && retries > 0) {
+                console.warn('Browser context crashed, resetting and retrying...');
+                this.browserContext = null; // Force context recreation
                 await new Promise(resolve => setTimeout(resolve, 2000)); // Wait before retry
                 return this.captureMessage(url, messageText, messageId, retries - 1);
             }
@@ -1028,16 +1473,11 @@ class ScreenshotService {
             
             return null;
         } finally {
-            // Always cleanup page and context
+            // Always cleanup page (but keep context alive for reuse)
             try {
                 if (page) await page.close().catch(() => {});
             } catch (e) {
                 console.warn('Error closing page:', e.message);
-            }
-            try {
-                if (context) await context.close().catch(() => {});
-            } catch (e) {
-                console.warn('Error closing context:', e.message);
             }
         }
     }
