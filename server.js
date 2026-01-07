@@ -34,6 +34,7 @@ const supabase = require('./services/supabase');
 const config = require('./config');
 const googleDriveService = require('./services/googleDrive');
 const { saveHtmlEvidence, getHtmlEvidence } = require('./storage');
+const { categorizeMessages } = require('./services/messageCategorizer');
 
 const app = express();
 const PORT = config.port || 3000;
@@ -203,6 +204,36 @@ app.get('/api/company/:id/messages', async (req, res) => {
     } catch (error) {
         console.error('Error fetching messages:', error);
         res.status(500).json({ error: 'Failed to fetch messages', details: error.message });
+    }
+});
+
+// 3c. Re-categorize Company Messages (with new theme-based system)
+app.post('/api/company/:id/re-categorize', async (req, res) => {
+    const { id } = req.params;
+    try {
+        // Fetch all messages for this company
+        const { data: messages, error: fetchError } = await supabase
+            .from('brand_messages')
+            .select('id, content, message_type, reasoning')
+            .eq('company_id', id);
+
+        if (fetchError) throw fetchError;
+
+        if (!messages || messages.length === 0) {
+            return res.status(404).json({ error: 'No messages found for this company' });
+        }
+
+        // Re-categorize with new theme-based system
+        const result = await categorizeMessages(id, messages);
+        
+        res.json({ 
+            success: true, 
+            message: `Re-categorized ${messages.length} messages into ${result.categories.length} theme-based categories`,
+            categories: result.categories
+        });
+    } catch (error) {
+        console.error('Error re-categorizing messages:', error);
+        res.status(500).json({ error: 'Failed to re-categorize messages', details: error.message });
     }
 });
 
