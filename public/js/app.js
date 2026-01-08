@@ -192,6 +192,107 @@ window.api = {
     }
 };
 
+/**
+ * Process items in batches with controlled concurrency, retries, and delays
+ * @param {Array} items - Array of items to process
+ * @param {Function} processor - Async function that processes a single item: (item, index) => Promise
+ * @param {Object} options - Configuration options
+ * @param {number} options.batchSize - Number of concurrent items to process (default: 2)
+ * @param {number} options.delayBetweenBatches - Delay in ms between batches (default: 1500)
+ * @param {number} options.delayWithinBatch - Delay in ms between items within a batch (default: 200)
+ * @param {number} options.maxRetries - Maximum number of retries for failed items (default: 2)
+ * @param {number} options.retryDelay - Initial delay in ms for retries, uses exponential backoff (default: 1000)
+ * @param {Function} options.shouldRetry - Function to determine if an item should be retried: (result) => boolean
+ * @param {Function} options.onProgress - Progress callback: (current, total, item) => void
+ * @returns {Promise<Array>} Array of results in the same order as input items
+ */
+async function processInBatches(items, processor, options = {}) {
+    const {
+        batchSize = 2,
+        delayBetweenBatches = 1500,
+        delayWithinBatch = 200,
+        maxRetries = 2,
+        retryDelay = 1000,
+        shouldRetry = (result) => result && !result.success,
+        onProgress = null
+    } = options;
+
+    const results = new Array(items.length);
+    const total = items.length;
+    let completed = 0;
+
+    // Helper function to process a single item with retries
+    async function processWithRetry(item, globalIndex, attempt = 0) {
+        try {
+            const result = await processor(item, globalIndex);
+            
+            // Check if result indicates failure and should be retried
+            if (shouldRetry(result) && attempt < maxRetries) {
+                const delay = retryDelay * Math.pow(2, attempt); // Exponential backoff
+                console.log(`[${globalIndex + 1}/${total}] Retry ${attempt + 1}/${maxRetries} after ${delay}ms delay...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return processWithRetry(item, globalIndex, attempt + 1);
+            }
+            
+            return result;
+        } catch (error) {
+            // Retry on exceptions if we haven't exceeded max retries
+            if (attempt < maxRetries) {
+                const delay = retryDelay * Math.pow(2, attempt); // Exponential backoff
+                console.log(`[${globalIndex + 1}/${total}] Exception occurred, retry ${attempt + 1}/${maxRetries} after ${delay}ms delay...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return processWithRetry(item, globalIndex, attempt + 1);
+            }
+            // Max retries exceeded, return error result
+            return { success: false, error: error.message || String(error) };
+        }
+    }
+
+    // Process items in batches
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        const batchIndexes = batch.map((_, idx) => i + idx);
+
+        // Process current batch with staggered starts and retries
+        const batchPromises = batch.map(async (item, batchIdx) => {
+            const globalIndex = batchIndexes[batchIdx];
+            
+            // Stagger the start of each item within the batch
+            if (batchIdx > 0) {
+                await new Promise(resolve => setTimeout(resolve, delayWithinBatch * batchIdx));
+            }
+            
+            try {
+                const result = await processWithRetry(item, globalIndex);
+                results[globalIndex] = result;
+                return { index: globalIndex, success: true, result };
+            } catch (error) {
+                results[globalIndex] = { success: false, error: error.message || String(error) };
+                return { index: globalIndex, success: false, error: error.message || String(error) };
+            } finally {
+                completed++;
+                if (onProgress) {
+                    onProgress(completed, total, item);
+                }
+            }
+        });
+
+        // Wait for current batch to complete
+        await Promise.all(batchPromises);
+
+        // Add delay between batches (except after the last batch)
+        if (i + batchSize < items.length) {
+            console.log(`Batch ${Math.floor(i / batchSize) + 1} completed, waiting ${delayBetweenBatches}ms before next batch...`);
+            await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+        }
+    }
+
+    return results;
+}
+
+// Export batch processing utility
+window.api.processInBatches = processInBatches;
+
 // Override native alert and confirm with custom centered versions
 window.alert = (message) => window.api.alert(message, 'Alert');
 window.confirm = (message) => window.api.confirm(message, 'Confirm');

@@ -819,8 +819,8 @@
             btn.innerHTML = 'GENERATING...';
 
             try {
-                // Generate screenshots for selected URLs
-                const promises = [];
+                // Build array of screenshot tasks
+                const screenshotTasks = [];
                 
                 Array.from(selectedIds).forEach(msgId => {
                     const msg = messages.find(m => m.id === msgId);
@@ -850,27 +850,18 @@
                         return;
                     }
                     
-                    // Generate screenshot for each selected URL
+                    // Create screenshot tasks for each URL
                     urlsToScreenshot.forEach(url => {
-                        console.log(`Generating screenshot for URL: ${url}`);
-                        promises.push(
-                            window.api.generateScreenshot(companyId, msgId, url, msg.content)
-                                .then(result => {
-                                    console.log(`Screenshot result for ${url}:`, result);
-                                    // API returns success: false for failed attempts
-                                    // This allows us to track failed attempts
-                                    return result;
-                                })
-                                .catch(err => {
-                                    console.error(`Failed to generate screenshot for ${url}:`, err);
-                                    // Return error object so we can count it
-                                    return { success: false, error: err.message };
-                                })
-                        );
+                        screenshotTasks.push({
+                            companyId: companyId,
+                            messageId: msgId,
+                            url: url,
+                            text: msg.content
+                        });
                     });
                 });
 
-                if (promises.length === 0) {
+                if (screenshotTasks.length === 0) {
                     alert('No URLs available to generate screenshots. Please ensure selected messages have page URLs.');
                     btn.disabled = false;
                     btn.innerHTML = originalButtonHTML;
@@ -878,10 +869,55 @@
                     return;
                 }
 
-                console.log(`Generating ${promises.length} screenshots...`);
+                console.log(`Generating ${screenshotTasks.length} screenshots in batches...`);
 
-                // Wait for all screenshots to complete
-                const results = await Promise.all(promises);
+                // Process screenshots in batches with controlled concurrency
+                const results = await window.api.processInBatches(
+                    screenshotTasks,
+                    async (task, index) => {
+                        console.log(`[${index + 1}/${screenshotTasks.length}] Generating screenshot for URL: ${task.url}`);
+                        try {
+                            const result = await window.api.generateScreenshot(
+                                task.companyId,
+                                task.messageId,
+                                task.url,
+                                task.text
+                            );
+                            
+                            // Add small delay after successful screenshot to allow browser context to recover
+                            if (result && result.success) {
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                            }
+                            
+                            console.log(`[${index + 1}/${screenshotTasks.length}] Screenshot result for ${task.url}:`, result);
+                            // API returns success: false for failed attempts
+                            // This allows us to track failed attempts
+                            return result;
+                        } catch (err) {
+                            console.error(`[${index + 1}/${screenshotTasks.length}] Failed to generate screenshot for ${task.url}:`, err);
+                            // Return error object so we can count it
+                            return { success: false, error: err.message || String(err) };
+                        }
+                    },
+                    {
+                        batchSize: 2, // Process 2 screenshots concurrently (reduced for better reliability)
+                        delayBetweenBatches: 1500, // 1.5s delay between batches (increased for browser context recovery)
+                        delayWithinBatch: 200, // 200ms delay between items within a batch (staggered starts)
+                        maxRetries: 2, // Retry failed screenshots up to 2 times
+                        retryDelay: 1000, // Initial retry delay (exponential backoff: 1s, 2s)
+                        shouldRetry: (result) => {
+                            // Retry if screenshot failed or returned error
+                            return result && !result.success;
+                        },
+                        onProgress: (current, total, task) => {
+                            // Update button with progress
+                            const percentage = Math.round((current / total) * 100);
+                            btn.innerHTML = `GENERATING... ${current}/${total} (${percentage}%)`;
+                            console.log(`Progress: ${current}/${total} screenshots completed (${percentage}%)`);
+                        }
+                    }
+                );
+
                 const successCount = results.filter(r => r && r.success === true).length;
                 const totalCount = results.length;
                 
