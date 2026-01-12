@@ -7,7 +7,8 @@
     <title>Company Messages | Villain Branding</title>
     <link rel="stylesheet" href="css/styles.css">
     <style>
-        html, body {
+        html,
+        body {
             height: 100%;
             overflow: hidden;
         }
@@ -69,12 +70,15 @@
             overflow-x: hidden;
             padding-right: 0.5rem;
             /* Hide scrollbar for Chrome, Safari and Opera */
-            scrollbar-width: none; /* Firefox */
-            -ms-overflow-style: none; /* IE and Edge */
+            scrollbar-width: none;
+            /* Firefox */
+            -ms-overflow-style: none;
+            /* IE and Edge */
         }
 
         .scrollable-messages-container::-webkit-scrollbar {
-            display: none; /* Chrome, Safari and Opera */
+            display: none;
+            /* Chrome, Safari and Opera */
         }
 
         .message-grid {
@@ -184,6 +188,7 @@
                 opacity: 0;
                 transform: translateY(-10px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -291,6 +296,28 @@
 
         .mt-2 {
             margin-top: 0.5rem;
+        }
+
+        .message-delete-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            transition: var(--transition);
+            flex-shrink: 0;
+        }
+
+        .message-delete-btn:hover {
+            background: rgba(220, 38, 38, 0.1);
+            border-color: #dc2626;
+            color: #dc2626;
         }
 
         /* Message Group Styles */
@@ -508,19 +535,19 @@
 
             // Group messages by common themes
             const groups = {};
-            
+
             messages.forEach(msg => {
                 const content = msg.content.toLowerCase();
                 const words = content.split(/\s+/);
-                
+
                 // Find the most prominent theme keyword in this message
                 let bestTheme = null;
                 let bestScore = 0;
-                
+
                 themeKeywords.forEach(theme => {
                     const themeWords = theme.split(/\s+/);
                     let score = 0;
-                    
+
                     themeWords.forEach(themeWord => {
                         // Check if theme word appears in message
                         if (content.includes(themeWord)) {
@@ -534,13 +561,13 @@
                             });
                         }
                     });
-                    
+
                     if (score > bestScore) {
                         bestScore = score;
                         bestTheme = theme;
                     }
                 });
-                
+
                 // If no theme found, use first significant word (3+ chars, not common words)
                 if (!bestTheme || bestScore === 0) {
                     const commonWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'we', 'you', 'they', 'it', 'our', 'your', 'their', 'its'];
@@ -551,19 +578,19 @@
                         bestTheme = 'other';
                     }
                 }
-                
+
                 // Capitalize theme for display
                 const displayTheme = bestTheme.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                
+
                 if (!groups[displayTheme]) {
                     groups[displayTheme] = [];
                 }
                 groups[displayTheme].push(msg);
             });
-            
+
             // Sort groups by number of messages (descending)
             const sortedGroups = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
-            
+
             return sortedGroups;
         }
 
@@ -588,12 +615,12 @@
                 // Fall back to keyword-based grouping
                 groupedMessages = extractThemes(messages);
             }
-            
+
             // Render grouped messages
             container.innerHTML = groupedMessages.map(([theme, themeMessages]) => {
                 const isExpanded = expandedGroups.has(theme);
                 const messageCards = themeMessages.map(msg => renderMessageCard(msg)).join('');
-                
+
                 return `
                     <div class="message-group">
                         <div class="message-group-header ${isExpanded ? 'expanded' : ''}" onclick="toggleGroup('${theme.replace(/'/g, "\\'")}')">
@@ -616,22 +643,22 @@
         }
 
         function renderMessageCard(msg) {
-                const locations = msg.locations || [];
-                const pageCount = locations.length || msg.count || 0;
-                const isDropdownOpen = openDropdowns.has(msg.id);
-                
-                // Generate dropdown HTML with checkboxes
-                let dropdownHTML = '';
-                if (locations.length > 0) {
-                    // Initialize selected URLs for this message if not exists
-                    if (!selectedUrls[msg.id]) {
-                        selectedUrls[msg.id] = new Set();
-                    }
-                    
-                    const urlLinks = locations.map((url, index) => {
-                        const isChecked = selectedUrls[msg.id].has(url);
-                        const escapedUrl = url.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, '');
-                        return `
+            const locations = msg.locations || [];
+            const pageCount = locations.length || msg.count || 0;
+            const isDropdownOpen = openDropdowns.has(msg.id);
+
+            // Generate dropdown HTML with checkboxes
+            let dropdownHTML = '';
+            if (locations.length > 0) {
+                // Initialize selected URLs for this message if not exists
+                if (!selectedUrls[msg.id]) {
+                    selectedUrls[msg.id] = new Set();
+                }
+
+                const urlLinks = locations.map((url, index) => {
+                    const isChecked = selectedUrls[msg.id].has(url);
+                    const escapedUrl = url.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, '');
+                    return `
                             <div class="message-dropdown-url" onclick="event.stopPropagation()">
                                 <div class="url-checkbox ${isChecked ? 'checked' : ''}" onclick="toggleUrlCheckbox('${msg.id}', '${escapedUrl}', event)" style="cursor: pointer;" data-url="${escapedUrl}">
                                     <input type="checkbox" ${isChecked ? 'checked' : ''}>
@@ -640,21 +667,21 @@
                                 <a href="${url}" target="_blank" style="margin-left: 0.5rem; color: var(--accent); text-decoration: none;" onclick="event.stopPropagation()" title="Open in new tab">↗</a>
                             </div>
                         `;
-                    }).join('');
-                    
-                    dropdownHTML = `
+                }).join('');
+
+                dropdownHTML = `
                         <div class="message-dropdown" id="dropdown-${msg.id}" style="display: ${isDropdownOpen ? 'block' : 'none'};" onclick="event.stopPropagation()">
                             <div class="message-dropdown-header">Select pages to generate screenshots:</div>
                             ${urlLinks}
                         </div>
                     `;
-                } else if (isDropdownOpen) {
-                    dropdownHTML = `
+            } else if (isDropdownOpen) {
+                dropdownHTML = `
                         <div class="message-dropdown" id="dropdown-${msg.id}" style="display: block;">
                             <div class="message-dropdown-header">No page URLs available</div>
                         </div>
                     `;
-                }
+            }
 
             return `
                 <div class="message-card ${selectedIds.has(msg.id) ? 'selected' : ''}" id="card-${msg.id}" onclick="toggleDropdown('${msg.id}')">
@@ -662,6 +689,9 @@
                         <h3 class="message-title">"${msg.content}"</h3>
                         <div class="message-header-right">
                             <div class="message-page-count">Found on ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}</div>
+                            <button class="message-delete-btn" onclick="deleteMessage('${msg.id}', event)" title="Delete message and all evidence">
+                                ×
+                            </button>
                             <div class="message-checkbox" onclick="toggleMessage('${msg.id}', event)">
                                 <input type="checkbox" ${selectedIds.has(msg.id) ? 'checked' : ''}>
                             </div>
@@ -696,7 +726,7 @@
             if (event) {
                 event.stopPropagation();
             }
-            
+
             if (selectedIds.has(id)) {
                 selectedIds.delete(id);
                 console.log(`Deselected message ${id}`);
@@ -713,7 +743,7 @@
             } else {
                 openDropdowns.add(id);
             }
-            
+
             // Toggle dropdown visibility without full re-render for better performance
             const dropdown = document.getElementById(`dropdown-${id}`);
             if (dropdown) {
@@ -730,14 +760,14 @@
                 event.stopPropagation();
                 event.preventDefault();
             }
-            
+
             console.log('Toggle URL checkbox:', messageId, url);
-            
+
             // Initialize if not exists
             if (!selectedUrls[messageId]) {
                 selectedUrls[messageId] = new Set();
             }
-            
+
             // Toggle URL selection
             const wasChecked = selectedUrls[messageId].has(url);
             if (wasChecked) {
@@ -745,9 +775,9 @@
             } else {
                 selectedUrls[messageId].add(url);
             }
-            
+
             console.log('Selected URLs for message', messageId, ':', Array.from(selectedUrls[messageId]));
-            
+
             // Find and update the checkbox UI using data-url attribute
             const dropdown = document.getElementById(`dropdown-${messageId}`);
             if (dropdown) {
@@ -755,12 +785,12 @@
                 urlItems.forEach(item => {
                     const checkbox = item.querySelector('.url-checkbox');
                     const urlText = item.querySelector('.url-text');
-                    
+
                     // Check if this item matches the URL using data-url attribute
                     if (checkbox && checkbox.getAttribute('data-url') === url) {
                         const checkboxInput = item.querySelector('input[type="checkbox"]');
                         const isNowChecked = selectedUrls[messageId].has(url);
-                        
+
                         if (isNowChecked) {
                             checkbox.classList.add('checked');
                             if (checkboxInput) checkboxInput.checked = true;
@@ -771,7 +801,7 @@
                     }
                 });
             }
-            
+
             // Update button state
             updateButton();
         };
@@ -779,7 +809,7 @@
         function updateButton() {
             const btn = document.getElementById('generateEvidencesBtn');
             const count = document.getElementById('selectedCount');
-            
+
             // Count total selected URLs across all selected messages
             let totalSelectedUrls = 0;
             selectedIds.forEach(msgId => {
@@ -794,43 +824,102 @@
                     }
                 }
             });
-            
+
             count.textContent = totalSelectedUrls;
             btn.disabled = totalSelectedUrls === 0;
         }
 
+        window.deleteMessage = async (messageId, event) => {
+            // Stop propagation to prevent triggering dropdown toggle
+            if (event) {
+                event.stopPropagation();
+            }
+
+            const msg = messages.find(m => m.id === messageId);
+            const messageText = msg ? msg.content : 'this message';
+
+            const confirmed = await window.api.confirm(
+                `Are you sure you want to delete "${messageText}"? This will also delete all associated evidence (screenshots). This action cannot be undone.`,
+                'Delete Message'
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const result = await window.api.deleteMessage(messageId);
+
+                if (result.success) {
+                    // Remove from local state
+                    messages = messages.filter(m => m.id !== messageId);
+                    selectedIds.delete(messageId);
+                    delete selectedUrls[messageId];
+                    openDropdowns.delete(messageId);
+
+                    // Update categorized data if it exists
+                    if (categorizedData && categorizedData.categories) {
+                        categorizedData.categories.forEach(cat => {
+                            if (cat.messages) {
+                                cat.messages = cat.messages.filter(m => m.id !== messageId);
+                            }
+                        });
+                    }
+
+                    // Re-render messages
+                    renderMessages();
+
+                    // Show success message
+                    const evidenceCount = result.deletedScreenshots || 0;
+                    const evidenceText = evidenceCount === 1 ? 'evidence' : 'pieces of evidence';
+                    await window.api.alert(
+                        `Message deleted successfully${evidenceCount > 0 ? ` along with ${evidenceCount} ${evidenceText}` : ''}.`,
+                        'Success'
+                    );
+                } else {
+                    throw new Error(result.error || 'Failed to delete message');
+                }
+            } catch (error) {
+                console.error('Error deleting message:', error);
+                await window.api.alert(
+                    `Failed to delete message: ${error.message || 'Unknown error'}`,
+                    'Error'
+                );
+            }
+        };
+
         document.getElementById('generateEvidencesBtn').onclick = async () => {
             const btn = document.getElementById('generateEvidencesBtn');
             const countSpan = document.getElementById('selectedCount');
-            
+
             // Validate that we have selected messages
             if (selectedIds.size === 0) {
                 alert('Please select at least one message to generate evidence.');
                 return;
             }
-            
+
             console.log('Generate evidence clicked. Selected messages:', Array.from(selectedIds));
             console.log('Selected URLs:', selectedUrls);
-            
+
             // Store original button content
             const originalButtonHTML = btn.innerHTML;
-            
+
             btn.disabled = true;
             btn.innerHTML = 'GENERATING...';
 
             try {
                 // Build array of screenshot tasks
                 const screenshotTasks = [];
-                
+
                 Array.from(selectedIds).forEach(msgId => {
                     const msg = messages.find(m => m.id === msgId);
                     if (!msg) {
                         console.warn(`Message with id ${msgId} not found`);
                         return;
                     }
-                    
+
                     console.log(`Processing message ${msgId}: "${msg.content}"`);
-                    
+
                     // Get URLs to screenshot for this message
                     // Logic matches updateButton(): if explicit URL selections exist, use those;
                     // otherwise, if message is selected, use all URLs from locations
@@ -844,12 +933,12 @@
                         urlsToScreenshot = msg.locations;
                         console.log(`Using all ${urlsToScreenshot.length} locations for message ${msgId}`);
                     }
-                    
+
                     if (urlsToScreenshot.length === 0) {
                         console.warn(`No URLs available for message ${msgId}`);
                         return;
                     }
-                    
+
                     // Create screenshot tasks for each URL
                     urlsToScreenshot.forEach(url => {
                         screenshotTasks.push({
@@ -883,12 +972,12 @@
                                 task.url,
                                 task.text
                             );
-                            
+
                             // Add small delay after successful screenshot to allow browser context to recover
                             if (result && result.success) {
                                 await new Promise(resolve => setTimeout(resolve, 100));
                             }
-                            
+
                             console.log(`[${index + 1}/${screenshotTasks.length}] Screenshot result for ${task.url}:`, result);
                             // API returns success: false for failed attempts
                             // This allows us to track failed attempts
@@ -920,9 +1009,9 @@
 
                 const successCount = results.filter(r => r && r.success === true).length;
                 const totalCount = results.length;
-                
+
                 console.log(`Screenshot generation complete: ${successCount}/${totalCount} successful`);
-                
+
                 if (successCount === 0 && totalCount > 0) {
                     alert(`All ${totalCount} screenshot generation attempts failed. Failed attempts are saved and can be re-generated from the Evidences page.`);
                 } else if (successCount < totalCount) {

@@ -101,7 +101,7 @@ app.get('/api/companies', async (req, res) => {
 // 2b. Delete Company
 app.delete('/api/company/:id', async (req, res) => {
     const { id } = req.params;
-    
+
     try {
         // First, get the company to verify it exists
         const { data: company, error: fetchError } = await supabase
@@ -160,7 +160,7 @@ app.delete('/api/company/:id', async (req, res) => {
 app.get('/api/company/:id/messages', async (req, res) => {
     const { id } = req.params;
     const includeCategories = req.query.include_categories === 'true';
-    
+
     try {
         let query = supabase
             .from('brand_messages')
@@ -207,7 +207,78 @@ app.get('/api/company/:id/messages', async (req, res) => {
     }
 });
 
-// 3c. Re-categorize Company Messages (with new theme-based system)
+// 3c. Delete Message (and all associated screenshots)
+app.delete('/api/message/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // First, get the message to verify it exists
+        const { data: message, error: fetchError } = await supabase
+            .from('brand_messages')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !message) {
+            return res.status(404).json({ error: 'Message not found' });
+        }
+
+        // Get all screenshots associated with this message
+        const { data: screenshots, error: screenshotsError } = await supabase
+            .from('screenshots')
+            .select('*')
+            .eq('message_id', id);
+
+        if (!screenshotsError && screenshots && screenshots.length > 0) {
+            // Delete screenshots from storage and database
+            for (const screenshot of screenshots) {
+                // Delete from Supabase Storage if it's a storage URL
+                if (screenshot.image_url && screenshot.image_url.includes('supabase.co')) {
+                    try {
+                        const urlParts = screenshot.image_url.split('/screenshots/');
+                        if (urlParts.length > 1) {
+                            const filePath = urlParts[1];
+                            await supabase.storage
+                                .from('screenshots')
+                                .remove([filePath]);
+                        }
+                    } catch (storageErr) {
+                        console.warn('Failed to delete screenshot from storage:', storageErr);
+                        // Continue even if storage deletion fails
+                    }
+                }
+
+                // Delete from database
+                await supabase
+                    .from('screenshots')
+                    .delete()
+                    .eq('id', screenshot.id);
+            }
+
+            console.log(`Deleted ${screenshots.length} screenshots associated with message ${id}`);
+        }
+
+        // Delete the message
+        const { error: deleteError } = await supabase
+            .from('brand_messages')
+            .delete()
+            .eq('id', id);
+
+        if (deleteError) throw deleteError;
+
+        res.json({
+            success: true,
+            message: 'Message and associated evidence deleted successfully',
+            deletedScreenshots: screenshots ? screenshots.length : 0
+        });
+
+    } catch (error) {
+        console.error('Delete message failed:', error);
+        res.status(500).json({ error: 'Failed to delete message', details: error.message });
+    }
+});
+
+// 3d. Re-categorize Company Messages (with new theme-based system)
 app.post('/api/company/:id/re-categorize', async (req, res) => {
     const { id } = req.params;
     try {
@@ -225,9 +296,9 @@ app.post('/api/company/:id/re-categorize', async (req, res) => {
 
         // Re-categorize with new theme-based system
         const result = await categorizeMessages(id, messages);
-        
-        res.json({ 
-            success: true, 
+
+        res.json({
+            success: true,
             message: `Re-categorized ${messages.length} messages into ${result.categories.length} theme-based categories`,
             categories: result.categories
         });
@@ -388,9 +459,9 @@ app.post('/api/screenshot', async (req, res) => {
                 })
                 .select()
                 .single();
-            
+
             // Return error but also return the failed record so frontend can show placeholder
-            return res.status(404).json({ 
+            return res.status(404).json({
                 success: false,
                 error: 'Screenshot capture failed',
                 details: `Could not capture screenshot of page ${url}. All three methods failed (Playwright with extensions, standalone Playwright, and Scrappey).`,
@@ -464,7 +535,7 @@ app.post('/api/screenshot', async (req, res) => {
 
         let screenshotRecord;
         let dbError;
-        
+
         // Try to insert with html_evidence_path if provided
         const { data, error } = await supabase
             .from('screenshots')
@@ -487,7 +558,7 @@ app.post('/api/screenshot', async (req, res) => {
                     .insert(dataWithoutEvidence)
                     .select()
                     .single();
-                
+
                 if (retryError) {
                     dbError = retryError;
                 } else {
@@ -517,15 +588,15 @@ app.post('/api/screenshot', async (req, res) => {
                 if (!companyError && company) {
                     // Use company name if available, otherwise fall back to domain
                     const companyName = company.name || company.domain;
-                    
+
                     if (companyName) {
                         // Parse created_at timestamp
-                        const createdAt = screenshotRecord.created_at 
-                            ? new Date(screenshotRecord.created_at) 
+                        const createdAt = screenshotRecord.created_at
+                            ? new Date(screenshotRecord.created_at)
                             : new Date();
 
                         console.log(`[Google Drive] Mirroring screenshot for company: ${companyName}, date: ${createdAt.toISOString().split('T')[0]}`);
-                        
+
                         // Mirror screenshot to Google Drive (non-blocking, don't fail if this errors)
                         googleDriveService.mirrorScreenshot(
                             imageBuffer,
@@ -574,7 +645,7 @@ app.post('/api/evidence/html', async (req, res) => {
     try {
         // Validate required parameters
         if (!url || !html) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
                 error: 'URL and HTML content are required',
                 details: 'Please provide both url and html in the request body'
@@ -585,7 +656,7 @@ app.post('/api/evidence/html', async (req, res) => {
         try {
             new URL(url);
         } catch (e) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false,
                 error: 'Invalid URL format',
                 details: e.message
@@ -614,10 +685,10 @@ app.post('/api/evidence/html', async (req, res) => {
 
     } catch (error) {
         console.error('[Evidence] Error saving HTML evidence:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             success: false,
-            error: 'Failed to save HTML evidence', 
-            details: error.message 
+            error: 'Failed to save HTML evidence',
+            details: error.message
         });
     }
 });
@@ -628,7 +699,7 @@ app.post('/api/screenshot-scrappey', async (req, res) => {
 
     // Validate required parameters
     if (!url) {
-        return res.status(400).json({ 
+        return res.status(400).json({
             success: false,
             error: 'URL is required',
             details: 'Please provide a valid URL in the request body'
@@ -639,7 +710,7 @@ app.post('/api/screenshot-scrappey', async (req, res) => {
     try {
         new URL(url);
     } catch (e) {
-        return res.status(400).json({ 
+        return res.status(400).json({
             success: false,
             error: 'Invalid URL format',
             details: `"${url}" is not a valid URL`
@@ -652,7 +723,7 @@ app.post('/api/screenshot-scrappey', async (req, res) => {
     const screenshotHeight = height ? parseInt(height) : undefined;
 
     if (screenshotWidth !== undefined && (isNaN(screenshotWidth) || screenshotWidth < 100 || screenshotWidth > 5000)) {
-        return res.status(400).json({ 
+        return res.status(400).json({
             success: false,
             error: 'Invalid width',
             details: 'Width must be a number between 100 and 5000 pixels'
@@ -660,7 +731,7 @@ app.post('/api/screenshot-scrappey', async (req, res) => {
     }
 
     if (screenshotHeight !== undefined && (isNaN(screenshotHeight) || screenshotHeight < 100 || screenshotHeight > 5000)) {
-        return res.status(400).json({ 
+        return res.status(400).json({
             success: false,
             error: 'Invalid height',
             details: 'Height must be a number between 100 and 5000 pixels'
@@ -692,7 +763,7 @@ app.post('/api/screenshot-scrappey', async (req, res) => {
 
     } catch (error) {
         console.error('Scrappey screenshot failed:', error);
-        
+
         // Determine appropriate status code
         let statusCode = 500;
         if (error.message.includes('required') || error.message.includes('Invalid URL')) {
@@ -701,7 +772,7 @@ app.post('/api/screenshot-scrappey', async (req, res) => {
             statusCode = 504; // Gateway Timeout
         }
 
-        res.status(statusCode).json({ 
+        res.status(statusCode).json({
             success: false,
             error: 'Screenshot capture failed',
             details: error.message
@@ -798,7 +869,7 @@ app.put('/api/screenshot/:id', async (req, res) => {
         // Convert base64 to buffer
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
         let imageBuffer;
-        
+
         try {
             imageBuffer = Buffer.from(base64Data, 'base64');
             if (imageBuffer.length === 0) {
@@ -907,7 +978,7 @@ app.post('/api/screenshot/:id/copy', async (req, res) => {
         // Convert base64 to buffer
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
         let imageBuffer;
-        
+
         try {
             imageBuffer = Buffer.from(base64Data, 'base64');
             if (imageBuffer.length === 0) {
@@ -975,7 +1046,7 @@ app.post('/api/screenshot/:id/copy', async (req, res) => {
 // 6c. Cleanup Duplicate Messages for a Company
 app.post('/api/company/:id/cleanup-duplicates', async (req, res) => {
     const { id } = req.params;
-    
+
     try {
         // Get all messages for this company
         const { data: messages, error: fetchError } = await supabase
@@ -1000,11 +1071,11 @@ app.post('/api/company/:id/cleanup-duplicates', async (req, res) => {
 
         // Group messages by normalized content and type
         const duplicateGroups = new Map();
-        
+
         messages.forEach(msg => {
             const normalized = normalizeMessageContent(msg.content);
             const key = `${msg.message_type}-${normalized}`;
-            
+
             if (!duplicateGroups.has(key)) {
                 duplicateGroups.set(key, []);
             }
@@ -1019,7 +1090,7 @@ app.post('/api/company/:id/cleanup-duplicates', async (req, res) => {
                 // Keep the first message, merge others into it
                 const primary = group[0];
                 const toMerge = group.slice(1);
-                
+
                 // Collect all unique locations
                 let allLocations = [...(primary.locations || [])];
                 toMerge.forEach(msg => {
@@ -1028,7 +1099,7 @@ app.post('/api/company/:id/cleanup-duplicates', async (req, res) => {
                     }
                 });
                 const uniqueLocations = [...new Set(allLocations)];
-                
+
                 // Update primary message
                 await supabase
                     .from('brand_messages')
@@ -1037,20 +1108,20 @@ app.post('/api/company/:id/cleanup-duplicates', async (req, res) => {
                         count: uniqueLocations.length
                     })
                     .eq('id', primary.id);
-                
+
                 // Delete duplicate messages
                 const duplicateIds = toMerge.map(m => m.id);
                 await supabase
                     .from('brand_messages')
                     .delete()
                     .in('id', duplicateIds);
-                
+
                 mergedCount += toMerge.length;
             }
         }
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: `Cleaned up ${mergedCount} duplicate messages`,
             merged: mergedCount
         });

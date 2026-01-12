@@ -11,7 +11,7 @@ async function apiRequest(endpoint, options = {}) {
     });
 
     const data = await response.json().catch(() => ({ error: 'Request failed' }));
-    
+
     // For screenshot generation, we want to return the response even if it's a 404
     // because failed attempts are now tracked in the database
     if (!response.ok && endpoint.includes('/api/screenshot') && response.status === 404) {
@@ -57,6 +57,11 @@ window.api = {
     // 3b. Get Company Categories with Messages
     getCompanyCategories: (companyId) => apiRequest(`/api/company/${companyId}/categories`),
 
+    // 3c. Delete Message (and all associated screenshots)
+    deleteMessage: (messageId) => apiRequest(`/api/message/${messageId}`, {
+        method: 'DELETE'
+    }),
+
     // 4. Generate Screenshot
     generateScreenshot: (companyId, messageId, url, text) => apiRequest('/api/screenshot', {
         method: 'POST',
@@ -95,7 +100,7 @@ window.api = {
             const allNavLinks = document.querySelectorAll('a.nav-link');
             navMessages = Array.from(allNavLinks).find(a => a.textContent.trim() === 'MESSAGES');
         }
-        
+
         // Find EVIDENCES link - try by ID first, then by text content
         let navEvidences = document.getElementById('navEvidences');
         if (!navEvidences) {
@@ -105,7 +110,7 @@ window.api = {
 
         // MESSAGES always points to companies list page
         if (navMessages) navMessages.href = `companies.html`;
-        
+
         // EVIDENCES always points to main proofs page (companies-proofs.html)
         if (navEvidences) navEvidences.href = `companies-proofs.html`;
     },
@@ -120,7 +125,7 @@ window.api = {
             const overlay = document.createElement('div');
             overlay.id = 'custom-dialog-overlay';
             overlay.className = 'custom-dialog-overlay';
-            
+
             overlay.innerHTML = `
                 <div class="custom-dialog">
                     <div class="custom-dialog-title">${title}</div>
@@ -133,10 +138,10 @@ window.api = {
 
             window.customDialogResolve = resolve;
             document.body.appendChild(overlay);
-            
+
             // Trigger animation
             setTimeout(() => overlay.classList.add('active'), 10);
-            
+
             // Close on Escape key
             const escapeHandler = (e) => {
                 if (e.key === 'Escape') {
@@ -160,7 +165,7 @@ window.api = {
             const overlay = document.createElement('div');
             overlay.id = 'custom-dialog-overlay';
             overlay.className = 'custom-dialog-overlay';
-            
+
             overlay.innerHTML = `
                 <div class="custom-dialog">
                     <div class="custom-dialog-title">${title}</div>
@@ -174,10 +179,10 @@ window.api = {
 
             window.customDialogResolve = resolve;
             document.body.appendChild(overlay);
-            
+
             // Trigger animation
             setTimeout(() => overlay.classList.add('active'), 10);
-            
+
             // Close on Escape key (cancels)
             const escapeHandler = (e) => {
                 if (e.key === 'Escape') {
@@ -225,7 +230,7 @@ async function processInBatches(items, processor, options = {}) {
     async function processWithRetry(item, globalIndex, attempt = 0) {
         try {
             const result = await processor(item, globalIndex);
-            
+
             // Check if result indicates failure and should be retried
             if (shouldRetry(result) && attempt < maxRetries) {
                 const delay = retryDelay * Math.pow(2, attempt); // Exponential backoff
@@ -233,7 +238,7 @@ async function processInBatches(items, processor, options = {}) {
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return processWithRetry(item, globalIndex, attempt + 1);
             }
-            
+
             return result;
         } catch (error) {
             // Retry on exceptions if we haven't exceeded max retries
@@ -256,12 +261,12 @@ async function processInBatches(items, processor, options = {}) {
         // Process current batch with staggered starts and retries
         const batchPromises = batch.map(async (item, batchIdx) => {
             const globalIndex = batchIndexes[batchIdx];
-            
+
             // Stagger the start of each item within the batch
             if (batchIdx > 0) {
                 await new Promise(resolve => setTimeout(resolve, delayWithinBatch * batchIdx));
             }
-            
+
             try {
                 const result = await processWithRetry(item, globalIndex);
                 results[globalIndex] = result;
