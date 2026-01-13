@@ -16,7 +16,7 @@ if [ -z "$1" ]; then
 fi
 
 CONNECTION_STRING="$1"
-SQL_FILE="supabase_schema.sql"
+SQL_FILE="../../database/schema.sql"
 
 if [ ! -f "$SQL_FILE" ]; then
     echo "❌ SQL file not found: $SQL_FILE"

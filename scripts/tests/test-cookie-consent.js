@@ -7,7 +7,7 @@
  * Usage: node test-cookie-consent.js
  */
 
-const StandaloneScreenshotService = require('./services/standaloneScreenshotService');
+const StandaloneScreenshotService = require('../../src/backend/services/standaloneScreenshotService');
 const fs = require('fs');
 const path = require('path');
 
@@ -50,7 +50,7 @@ async function runTests() {
     const results = [];
 
     // Create test results directory
-    const resultsDir = path.join(__dirname, 'screenshots', 'test-results');
+    const resultsDir = path.join(__dirname, '../../screenshots', 'test-results');
     if (!fs.existsSync(resultsDir)) {
         fs.mkdirSync(resultsDir, { recursive: true });
     }

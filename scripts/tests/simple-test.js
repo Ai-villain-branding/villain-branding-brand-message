@@ -1,67 +1,70 @@
 /**
- * Test Consent Neutralization Strategy
+ * Simple Cookie Consent Test
  * 
- * Tests the new approach on ClickUp Privacy page
- * (known to fail with hard-blocking approach)
+ * Tests the cookie consent handler with a single site
+ * Uses only Playwright (no fallback engines needed)
+ * 
+ * Usage: node simple-test.js
  */
 
-const StandaloneScreenshotService = require('./services/standaloneScreenshotService');
+const StandaloneScreenshotService = require('../../src/backend/services/standaloneScreenshotService');
 const fs = require('fs');
 const path = require('path');
 
-async function testConsentNeutralization() {
+async function simpleTest() {
     console.log('='.repeat(70));
-    console.log('CONSENT NEUTRALIZATION TEST');
-    console.log('Testing on ClickUp Privacy page (known CMP-heavy site)');
+    console.log('SIMPLE COOKIE CONSENT TEST');
     console.log('='.repeat(70));
     console.log('');
 
     const service = new StandaloneScreenshotService();
 
     // Create test results directory
-    const resultsDir = path.join(__dirname, 'screenshots', 'neutralization-test');
+    const resultsDir = path.join(__dirname, '../../screenshots', 'simple-test');
     if (!fs.existsSync(resultsDir)) {
         fs.mkdirSync(resultsDir, { recursive: true });
     }
 
-    const testUrl = 'https://www.clickup.com/terms/privacy';
-    const testText = 'Privacy Policy';
+    // Test with a simple site
+    const testUrl = 'https://example.com';
+    const testText = 'Example Domain';
 
-    console.log(`URL: ${testUrl}`);
-    console.log(`Looking for: "${testText}"`);
+    console.log(`Testing URL: ${testUrl}`);
+    console.log(`Looking for text: "${testText}"`);
     console.log('-'.repeat(70));
     console.log('');
 
     const startTime = Date.now();
 
     try {
-        const result = await service.captureMessage(testUrl, testText, 'neutralization-test');
+        const result = await service.captureMessage(testUrl, testText, 'simple-test');
         const duration = Date.now() - startTime;
 
         if (result && result.buffer) {
             // Save screenshot
-            const filepath = path.join(resultsDir, 'clickup-privacy.png');
+            const filepath = path.join(resultsDir, 'example-com.png');
             fs.writeFileSync(filepath, result.buffer);
 
-            console.log('');
             console.log('✓ SUCCESS!');
             console.log(`  Duration: ${duration}ms`);
             console.log(`  Source: ${result.metadata.source}`);
-            console.log(`  Selector: ${result.metadata.selector}`);
             console.log(`  Screenshot saved: ${filepath}`);
             console.log('');
 
-            if (result.metadata.neutralizationStats) {
-                console.log('Neutralization Stats:');
-                console.log(`  ${result.metadata.neutralizationStats.summary}`);
-                console.log(`  Allowed scripts: ${result.metadata.neutralizationStats.allowedScripts}`);
-                console.log(`  Blocked trackers: ${result.metadata.neutralizationStats.blockedTrackers}`);
+            // Get consent handler stats
+            if (service.consentHandler) {
+                const stats = service.consentHandler.getStats();
+                console.log('Cookie Consent Handler Stats:');
+                console.log(`  Blocked requests: ${stats.blockedRequests}`);
+                console.log(`  Consent injected: ${stats.injectedConsent}`);
+                console.log(`  CSS applied: ${stats.cssApplied}`);
+                console.log(`  Element strategy: ${stats.elementStrategy || 'N/A'}`);
+                console.log(`  Summary: ${stats.summary}`);
             }
 
             console.log('');
             console.log('='.repeat(70));
             console.log('TEST PASSED ✓');
-            console.log('Consent scripts were ALLOWED to load but NEUTRALIZED');
             console.log('='.repeat(70));
 
             process.exit(0);
@@ -71,10 +74,10 @@ async function testConsentNeutralization() {
         }
     } catch (error) {
         const duration = Date.now() - startTime;
-        console.log('');
         console.log('✗ ERROR');
         console.log(`  Duration: ${duration}ms`);
         console.log(`  Error: ${error.message}`);
+        console.log(`  Stack: ${error.stack}`);
         console.log('');
         console.log('='.repeat(70));
         console.log('TEST FAILED ✗');
@@ -84,7 +87,7 @@ async function testConsentNeutralization() {
 }
 
 // Run test
-testConsentNeutralization().catch(error => {
+simpleTest().catch(error => {
     console.error('Fatal error:', error);
     process.exit(1);
 });

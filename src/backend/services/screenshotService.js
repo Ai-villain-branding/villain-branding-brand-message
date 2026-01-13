@@ -53,7 +53,7 @@ class ScreenshotService {
             }
 
             // Get absolute path to chrome extension directory (screenshot stabilizer only)
-            const pathToExtension = path.resolve(__dirname, '..', 'chrome-extension');
+            const pathToExtension = path.resolve(__dirname, '../../../extensions/chrome-extension');
 
             // Verify extension directory exists
             if (!fs.existsSync(pathToExtension)) {
@@ -738,7 +738,7 @@ class ScreenshotService {
     // Inject content script directly into page (fallback when extension doesn't load)
     async injectStabilizerScript(page) {
         try {
-            const contentScriptPath = path.resolve(__dirname, '..', 'chrome-extension', 'content.js');
+            const contentScriptPath = path.resolve(__dirname, '../../../extensions/chrome-extension', 'content.js');
 
             if (fs.existsSync(contentScriptPath)) {
                 const contentScript = fs.readFileSync(contentScriptPath, 'utf8');

@@ -149,18 +149,45 @@
             overflow: hidden;
         }
 
+        .proof-image-container {
+            width: 100%;
+            height: 300px;
+            background: #000;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-bottom: 1px solid var(--border);
+            position: relative;
+        }
+
         .proof-image {
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: cover;
+            object-position: top;
             display: block;
-            border-bottom: 1px solid var(--border);
             cursor: pointer;
             transition: transform 0.3s ease, opacity 0.3s ease;
+            border-bottom: none;
+            /* Removed as container has border */
         }
 
         .proof-image:hover {
             opacity: 0.9;
-            transform: scale(1.02);
+            transform: scale(1.05);
+        }
+
+        .proof-placeholder {
+            width: 100%;
+            height: 100%;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 2rem;
         }
 
         .proof-content {
@@ -627,38 +654,6 @@
                 .sort((a, b) => b[0].localeCompare(a[0])); // Sort dates descending
         }
 
-        // Helper function to format "Found on" display
-        // Always displays only the domain name, regardless of the page path
-        function formatFoundOnDisplay(originalUrl, company) {
-            if (!originalUrl) {
-                return { display: 'Unknown', href: '#' };
-            }
-
-            try {
-                const urlObj = new URL(originalUrl);
-                const fullUrl = originalUrl; // Keep full URL for href attribute
-
-                // Get domain from company data or extract from URL
-                let domain = '';
-                if (company && company.domain) {
-                    domain = company.domain;
-                } else {
-                    domain = urlObj.hostname;
-                }
-
-                // Always display only the domain name
-                return { display: domain, href: fullUrl };
-            } catch (e) {
-                // If URL parsing fails, try to extract domain from string
-                try {
-                    const match = originalUrl.match(/https?:\/\/([^\/]+)/);
-                    const domain = match ? match[1] : originalUrl;
-                    return { display: domain, href: originalUrl };
-                } catch {
-                    return { display: 'Unknown', href: originalUrl };
-                }
-            }
-        }
 
         // Helper function to render a single proof card
         function renderProofCard(proof, messagesMap, company) {
@@ -667,43 +662,53 @@
             const cardId = `proof-${proof.id}`;
             const isFailed = !proof.image_url || proof.status === 'failed';
 
-            // Format "Found on" display
-            const foundOnData = formatFoundOnDisplay(proof.original_url, company);
-            const foundOnDisplay = foundOnData.display;
-            const foundOnHref = foundOnData.href;
+            // Format URL for display
+            let foundOnDisplay = 'Unknown page';
+            let foundOnHref = '#';
+            try {
+                if (proof.original_url) {
+                    const url = new URL(proof.original_url);
+                    foundOnDisplay = url.pathname === '/' ? 'Homepage' : url.pathname;
+                    foundOnHref = proof.original_url;
+                }
+            } catch (e) {
+                console.warn('Invalid URL in proof:', proof.original_url);
+            }
 
             return `
-                <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
-                  ${isFailed ? `
-                    <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete failed attempt">×</button>
-                  ` : `
-                    <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete screenshot">×</button>
-                    <button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>
-                  `}
-                  ${isFailed ? `
-                    <div class="proof-placeholder" style="width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-                      <div style="text-align: center;">
-                        <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
-                        <div style="margin-bottom: 0.5rem;">📷</div>
-                        <div>Click RE-GENERATE to try again</div>
-                      </div>
-                    </div>
-                  ` : `
-                    <img src="${proof.image_url}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${proof.image_url}')">
-                  `}
-                  <div class="proof-content">
-                    <div class="proof-text">"${messageContent}"</div>
-                    <div class="proof-meta">
-                      Found on: <a href="${foundOnHref}" target="_blank" class="found-on-display">${foundOnDisplay}</a>
-                    </div>
-                    <div style="margin-top: 1rem;">
-                      <button class="btn btn-secondary re-capture-btn" data-proof-id="${proof.id}" data-image-url="${proof.image_url || ''}" data-is-failed="${isFailed}" onclick="handleReCaptureOrDownload('${proof.message_id || ''}', '${(proof.original_url || '').replace(/'/g, "\\'")}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', '${proof.image_url || ''}', ${isFailed}, event)" style="width: 100%;">
-                        ${isFailed ? 'RE-GENERATE' : 'RE-CAPTURE'}
-                      </button>
-                    </div>
-                  </div>
+        <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
+          <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete screenshot">×</button>
+          ${!isFailed ? `<button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>` : ''}
+          
+          <div class="proof-image-container">
+            ${isFailed ? `
+              <div class="proof-placeholder">
+                <div style="text-align: center;">
+                  <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
+                  <div style="margin-bottom: 0.5rem;">📷</div>
+                  <div>Click RE-GENERATE to try again</div>
                 </div>
-            `;
+              </div>
+            ` : `
+              <img src="${proof.image_url}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${proof.image_url}')">
+            `}
+          </div>
+
+          <div class="proof-content">
+            <div class="proof-text">"${messageContent}"</div>
+            <div class="proof-meta">
+              Found on: <a href="${foundOnHref}" target="_blank" class="found-on-display">${foundOnDisplay}</a>
+            </div>
+            <div style="margin-top: 1.5rem;">
+              <button class="btn btn-secondary re-capture-btn" 
+                data-is-failed="${isFailed}"
+                onclick="handleReCaptureOrDownload('${proof.message_id}', '${proof.original_url}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', '${proof.image_url}', ${isFailed}, event)">
+                ${isFailed ? 'RE-GENERATE' : 'RE-CAPTURE'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
         }
 
         function renderAllPages(messages, existingEvidences, company) {
@@ -847,31 +852,6 @@
             }
         }
 
-        function renderEvidences(proofs) {
-            const container = document.getElementById('proofsGrid');
-
-            if (!proofs || proofs.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No proofs generated yet. Go back to Messages to generate some.</p>`;
-                return;
-            }
-
-            container.innerHTML = proofs.map((proof, index) => {
-                const cardId = `proof-${proof.id}`;
-                return `
-                <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
-                  <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete screenshot">×</button>
-                  <button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>
-                  <img src="${proof.image_url}" alt="Visual Proof" class="proof-image" onclick="openLightbox('${proof.image_url}')">
-                  <div class="proof-content">
-                    <div class="proof-text">"${proof.message_content}"</div>
-                    <div class="proof-meta">
-                      Found on: <a href="${proof.original_url}" target="_blank" class="text-accent">${new URL(proof.original_url).pathname}</a>
-                    </div>
-                  </div>
-                </div>
-            `;
-            }).join('');
-        }
 
         async function deleteProof(screenshotId, cardId, event) {
             event.stopPropagation(); // Prevent image click

@@ -143,8 +143,8 @@ class StandaloneScreenshotService {
             this.log('info', `Starting capture for: ${url}`);
 
             // PATH TO EXTENSIONS
-            const cloudflareExtPath = path.resolve(__dirname, '..', 'cloudflare-extension');
-            const stabilizerExtPath = path.resolve(__dirname, '..', 'chrome-extension');
+            const cloudflareExtPath = path.resolve(__dirname, '../../../extensions/cloudflare-extension');
+            const stabilizerExtPath = path.resolve(__dirname, '../../../extensions/chrome-extension');
             const useCloudflareExt = this.cloudflareExtensionEnabled && fs.existsSync(cloudflareExtPath);
             const useStabilizerExt = fs.existsSync(stabilizerExtPath);
 
