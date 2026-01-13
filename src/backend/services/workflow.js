@@ -536,20 +536,51 @@ async function fetchHtml(url, usePlaywright = false) {
 
             const page = await context.newPage();
 
-            // Apply some stealth
+            // Apply stealth
             await page.addInitScript(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                window.chrome = { runtime: {} };
+            });
+
+            // Block analytics to speed up loading
+            await page.route('**/*', (route) => {
+                const url = route.request().url().toLowerCase();
+                const blockedDomains = ['google-analytics.com', 'googletagmanager.com', 'facebook.com/tr', 'doubleclick.net'];
+                if (blockedDomains.some(d => url.includes(d))) {
+                    return route.abort();
+                }
+                return route.continue();
             });
 
             await page.goto(url, {
-                waitUntil: 'networkidle',
+                waitUntil: 'domcontentloaded',
                 timeout: 60000
             });
 
-            // Wait for content to stabilize
-            await page.waitForTimeout(5000);
+            // Wait for page to stabilize
+            await page.waitForTimeout(3000);
 
-            // Extract content and links within the browser context
+            // Scroll to trigger lazy loading
+            await page.evaluate(() => {
+                window.scrollTo(0, document.body.scrollHeight * 0.5);
+            });
+            await page.waitForTimeout(2000);
+            await page.evaluate(() => {
+                window.scrollTo(0, 0);
+            });
+            await page.waitForTimeout(2000);
+
+            // Wait for content to appear
+            try {
+                await page.waitForFunction(
+                    () => document.body.innerText.length > 500,
+                    { timeout: 15000 }
+                );
+            } catch (e) {
+                console.log(`[fetchHtml] Warning: Page content < 500 chars after wait.`);
+            }
+
+            // Extract content using simple innerText
             const extractionResult = await page.evaluate(() => {
                 const results = {
                     content: '',
@@ -561,62 +592,44 @@ async function fetchHtml(url, usePlaywright = false) {
                 const seenLinks = new Set();
                 const baseHost = window.location.hostname;
 
-                const walk = (node, depth = 0) => {
-                    if (depth > 20) return; // Prevent infinite recursion
-
-                    // Extract text from visible elements
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        const style = window.getComputedStyle(node);
-                        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
-
-                        // Capture links
-                        if (node.tagName === 'A' && node.href) {
-                            try {
-                                const url = new URL(node.href);
-                                if (url.hostname === baseHost && !seenLinks.has(node.href)) {
-                                    seenLinks.add(node.href);
-                                    results.links.push({
-                                        text: node.innerText.trim().substring(0, 100),
-                                        href: node.href
-                                    });
-                                }
-                            } catch (e) { }
+                // Capture all links
+                document.querySelectorAll('a[href]').forEach(a => {
+                    try {
+                        const url = new URL(a.href);
+                        if (url.hostname === baseHost && !seenLinks.has(a.href)) {
+                            seenLinks.add(a.href);
+                            results.links.push({
+                                text: (a.innerText || a.textContent || '').trim().substring(0, 100),
+                                href: a.href
+                            });
                         }
+                    } catch (e) { }
+                });
 
-                        // Capture text from headings and paragraphs
-                        const tag = node.tagName;
-                        if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'P', 'LI', 'SPAN', 'DIV'].includes(tag)) {
-                            const text = node.innerText.trim();
-                            if (text && text.length > 20 && text.length < 2000) {
-                                // Avoid duplicates from parent/child
-                                if (!results.content.includes(text.substring(0, 50))) {
-                                    results.content += (tag.startsWith('H') ? `\n[${tag}] ` : '\n') + text + '\n';
-                                }
-                            }
-                        }
+                // Capture visible text from main content areas
+                const contentSelectors = [
+                    'main', 'article', '[role="main"]', '.content', '#content',
+                    '.hero', '.banner', 'section', '.main-content'
+                ];
 
-                        // Traverse Shadow DOM
-                        if (node.shadowRoot) {
-                            walk(node.shadowRoot, depth + 1);
-                        }
-
-                        // Traverse Iframes (if same-origin)
-                        if (node.tagName === 'IFRAME') {
-                            try {
-                                if (node.contentDocument) {
-                                    walk(node.contentDocument, depth + 1);
-                                }
-                            } catch (e) { }
-                        }
+                let mainContent = '';
+                for (const selector of contentSelectors) {
+                    const el = document.querySelector(selector);
+                    if (el && el.innerText) {
+                        mainContent += el.innerText + '\n';
                     }
+                }
 
-                    // Process children
-                    for (let child of node.childNodes) {
-                        walk(child, depth + 1);
-                    }
-                };
+                // Fallback to body if still not enough
+                if (mainContent.length < 500) {
+                    mainContent = document.body.innerText || document.body.textContent || '';
+                }
 
-                walk(document.body);
+                // Clean up the content
+                results.content = mainContent
+                    .replace(/\s+/g, ' ')
+                    .substring(0, 50000);
+
                 return results;
             });
 
