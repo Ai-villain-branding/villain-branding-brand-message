@@ -31,6 +31,168 @@ class ScreenshotService {
         // Enable/disable fallbacks via environment variables
         this.enablePuppeteerFallback = process.env.ENABLE_PUPPETEER_FALLBACK !== 'false';
         this.enableSeleniumFallback = process.env.ENABLE_SELENIUM_FALLBACK !== 'false';
+
+        // Domain-specific rate limiting state
+        this.domainLastRequestTime = new Map();
+    }
+
+    // Normalize text for robust matching
+    normalizeText(text) {
+        if (!text) return '';
+        return text.toLowerCase()
+            .replace(/[^\w\s]/g, '') // Remove punctuation
+            .replace(/\s+/g, ' ')    // Collapse multiple spaces
+            .trim();
+    }
+
+    // Detect if a domain is high-risk (insurance/healthcare)
+    isHighRiskDomain(url) {
+        try {
+            const domain = new URL(url).hostname.toLowerCase();
+            const highRiskPatterns = [
+                'aetna', 'uhc', 'unitedhealthcare', 'cigna', 'geico',
+                'statefarm', 'humana', 'bcbs', 'bluecross', 'progressive',
+                'metlife', 'prudential', 'allstate', 'libertymutual', 'nationwide'
+            ];
+            return highRiskPatterns.some(pattern => domain.includes(pattern));
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Apply stealth techniques to avoid bot detection
+    async applyStealth(page) {
+        await page.addInitScript(() => {
+            // Override navigator.webdriver
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false,
+            });
+
+            // Mock chrome object
+            window.chrome = {
+                runtime: {},
+                loadTimes: function () { },
+                csi: function () { },
+                app: {}
+            };
+
+            // Mock plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5],
+            });
+
+            // Mock permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+
+            // Mock hardwareConcurrency
+            Object.defineProperty(navigator, 'hardwareConcurrency', {
+                get: () => 8,
+            });
+
+            // Mock platform
+            Object.defineProperty(navigator, 'platform', {
+                get: () => 'MacIntel',
+            });
+        });
+    }
+
+    // Block analytics and tracking to speed up load and reduce detection
+    async blockAnalytics(page) {
+        await page.route('**/*', (route) => {
+            const url = route.request().url().toLowerCase();
+            const analyticsDomains = [
+                'google-analytics.com',
+                'googletagmanager.com',
+                'facebook.com/tr',
+                'doubleclick.net',
+                'hotjar.com',
+                'mouseflow.com',
+                'crazyegg.com',
+                'optimizely.com',
+                'segment.io',
+                'intercom.io'
+            ];
+
+            const isAnalytics = analyticsDomains.some(domain => url.includes(domain));
+            if (isAnalytics) {
+                route.abort();
+            } else {
+                route.continue();
+            }
+        });
+    }
+
+    // Aggressive cookie consent neutralization
+    async neutralizeCookieConsent(page) {
+        try {
+            console.log('[Screenshot] Neutralizing cookie consent...');
+
+            // 1. Inject CSS to hide common consent elements
+            await page.addStyleTag({
+                content: `
+                    .cookie-consent, .gdpr-banner, .privacy-notice, 
+                    #onetrust-consent-sdk, .optanon-alert-box-wrapper,
+                    [class*="cookie" i], [id*="cookie" i],
+                    [class*="consent" i], [id*="consent" i],
+                    [id*="CybotCookiebotDialog"], #cookiescript_injected,
+                    .cc-window, .qc-cmp2-container {
+                        display: none !important;
+                        visibility: hidden !important;
+                        opacity: 0 !important;
+                        pointer-events: none !important;
+                    }
+                    body, html {
+                        overflow: auto !important;
+                        position: static !important;
+                    }
+                `
+            });
+
+            // 2. Find and click "Accept" buttons
+            await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+                const acceptPatterns = [/accept/i, /agree/i, /allow/i, /continue/i, /ok/i, /got it/i];
+
+                for (const btn of buttons) {
+                    const text = btn.innerText || btn.textContent || '';
+                    if (acceptPatterns.some(pattern => pattern.test(text))) {
+                        // Check if visible
+                        const rect = btn.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(btn).display !== 'none') {
+                            btn.click();
+                            console.log('Clicked consent button:', text);
+                        }
+                    }
+                }
+
+                // 3. Remove visible consent elements
+                const selectors = [
+                    '.cookie-consent', '.gdpr-banner', '.privacy-notice',
+                    '#onetrust-consent-sdk', '.optanon-alert-box-wrapper',
+                    '[class*="cookie" i]', '[id*="cookie" i]',
+                    '[class*="consent" i]', '[id*="consent" i]'
+                ];
+
+                selectors.forEach(selector => {
+                    document.querySelectorAll(selector).forEach(el => {
+                        const rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            el.remove();
+                        }
+                    });
+                });
+            });
+
+            await page.waitForTimeout(1000);
+            console.log('[Screenshot] Cookie consent removed');
+        } catch (error) {
+            console.warn('[Screenshot] Error neutralizing cookie consent:', error.message);
+        }
     }
 
     // Initialize browser with persistent context (following the provided code snippet pattern)
@@ -420,192 +582,140 @@ class ScreenshotService {
 
     // Find element containing text with multiple strategies
     async findElementWithText(page, text) {
-        const cleanText = text.trim().replace(/\s+/g, ' ');
-        const normalizedText = cleanText.toLowerCase();
+        if (!text) return null;
 
-        // Also create a version with common punctuation removed for better matching
-        const normalizedTextNoPunct = normalizedText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
+        const normalizedSearch = this.normalizeText(text);
+        if (!normalizedSearch) return null;
 
-        // Strategy 1: Custom script to find the smallest element containing the full text
-        // This handles case-insensitive matching and finds the most specific element
-        try {
-            const handle = await page.evaluateHandle(({ targetText, normalizedTarget, normalizedTargetNoPunct }) => {
-                // Get all text-containing elements, including those in shadow DOM if possible
-                const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li, button, label, strong, em, b, i, article, section, blockquote, cite');
-                let bestMatch = null;
-                let minArea = Infinity;
-                let bestScore = 0;
+        console.log(`[Screenshot] Searching for text: "${text.substring(0, 50)}..."`);
 
-                for (const el of elements) {
-                    const elText = (el.innerText || el.textContent || '').trim();
-                    if (!elText) continue;
-
-                    const normalizedElText = elText.toLowerCase().replace(/\s+/g, ' ');
-                    const normalizedElTextNoPunct = normalizedElText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
-
-                    // Check if element contains the target text (case-insensitive, with or without punctuation)
-                    const containsText = normalizedElText.includes(normalizedTarget) ||
-                        normalizedElTextNoPunct.includes(normalizedTargetNoPunct);
-
-                    if (containsText) {
-                        const rect = el.getBoundingClientRect();
-                        const area = rect.width * rect.height;
-
-                        // Score based on how well the text matches
-                        let score = 0;
-                        if (normalizedElText === normalizedTarget || normalizedElTextNoPunct === normalizedTargetNoPunct) {
-                            score = 100; // Exact match
-                        } else if (normalizedElText.startsWith(normalizedTarget) || normalizedElText.endsWith(normalizedTarget)) {
-                            score = 80; // Starts or ends with
-                        } else if (normalizedElTextNoPunct.includes(normalizedTargetNoPunct)) {
-                            score = 70; // Match without punctuation
+        // Helper for fuzzy matching within evaluate
+        const fuzzyMatchLogic = `
+            const normalize = (t) => (t || '').toLowerCase().replace(/[^\\w\\s]/g, '').replace(/\\s+/g, ' ').trim();
+            
+            const getLevenshteinDistance = (a, b) => {
+                const matrix = [];
+                for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+                for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+                for (let i = 1; i <= b.length; i++) {
+                    for (let j = 1; j <= a.length; j++) {
+                        if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                            matrix[i][j] = matrix[i - 1][j - 1];
                         } else {
-                            score = 60; // Contains
+                            matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
                         }
+                    }
+                }
+                return matrix[b.length][a.length];
+            };
 
-                        // Prefer smaller elements (more specific)
-                        // Prefer visible elements
-                        if (rect.width > 0 && rect.height > 0 &&
-                            area > 0 &&
-                            (score > bestScore || (score === bestScore && area < minArea))) {
-                            minArea = area;
-                            bestScore = score;
-                            bestMatch = el;
+            const isFuzzyMatch = (pageText, searchText, threshold = 0.8) => {
+                const normPage = normalize(pageText);
+                const normSearch = normalize(searchText);
+                
+                if (normPage.includes(normSearch)) return true;
+                
+                const searchWords = normSearch.split(' ').filter(w => w.length > 3);
+                if (searchWords.length === 0) return false;
+                
+                let matches = 0;
+                for (const word of searchWords) {
+                    if (normPage.includes(word)) matches++;
+                }
+                
+                if (matches / searchWords.length >= threshold) return true;
+                
+                const distance = getLevenshteinDistance(normPage, normSearch);
+                if (distance <= normSearch.length * 0.2) return true;
+                
+                return false;
+            };
+
+            const findInTree = (root) => {
+                const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
+                let node;
+                let bestMatch = null;
+                let smallestArea = Infinity;
+
+                while (node = walker.nextNode()) {
+                    // Skip hidden elements
+                    const style = window.getComputedStyle(node);
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+                    const text = node.innerText || node.textContent || '';
+                    if (isFuzzyMatch(text, targetText)) {
+                        const rect = node.getBoundingClientRect();
+                        const area = rect.width * rect.height;
+                        if (area > 0 && area < smallestArea) {
+                            smallestArea = area;
+                            bestMatch = node;
+                        }
+                    }
+
+                    // Check Shadow DOM
+                    if (node.shadowRoot) {
+                        const shadowMatch = findInTree(node.shadowRoot);
+                        if (shadowMatch) {
+                            const rect = shadowMatch.getBoundingClientRect();
+                            const area = rect.width * rect.height;
+                            if (area > 0 && area < smallestArea) {
+                                smallestArea = area;
+                                bestMatch = shadowMatch;
+                            }
                         }
                     }
                 }
                 return bestMatch;
-            }, { targetText: cleanText, normalizedTarget: normalizedText, normalizedTargetNoPunct: normalizedTextNoPunct });
+            };
+        `;
+
+        // Strategy 1: Main document search (including Shadow DOM)
+        try {
+            const handle = await page.evaluateHandle(`({ targetText }) => {
+                ${fuzzyMatchLogic}
+                return findInTree(document.body);
+            }`, { targetText: text });
 
             if (handle && handle.asElement()) {
+                console.log('[Screenshot] Text found in main document');
                 return handle.asElement();
             }
         } catch (error) {
-            console.warn('Strategy 1 failed:', error.message);
+            console.warn('[Screenshot] Main document search failed:', error.message);
         }
 
-        // Strategy 2: Try to find text that might be split across multiple elements
-        try {
-            const element = await page.evaluateHandle(({ targetText, normalizedTarget, normalizedTargetNoPunct }) => {
-                // Get all text nodes and check if their combined text contains the target
-                const walker = document.createTreeWalker(
-                    document.body,
-                    NodeFilter.SHOW_TEXT,
-                    null
-                );
-
-                let node;
-                const textNodes = [];
-                while (node = walker.nextNode()) {
-                    const text = node.textContent.trim();
-                    if (text) {
-                        textNodes.push({ node, text });
-                    }
-                }
-
-                // Check individual nodes
-                for (const { node, text } of textNodes) {
-                    const normalizedText = text.toLowerCase().replace(/\s+/g, ' ');
-                    const normalizedTextNoPunct = normalizedText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
-
-                    if (normalizedText.includes(normalizedTarget) || normalizedTextNoPunct.includes(normalizedTargetNoPunct)) {
-                        // Find the parent element
-                        let parent = node.parentElement;
-                        while (parent && parent !== document.body) {
-                            // Prefer semantic elements
-                            const tag = parent.tagName.toLowerCase();
-                            if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div', 'a', 'li', 'article', 'section'].includes(tag)) {
-                                return parent;
-                            }
-                            parent = parent.parentElement;
-                        }
-                        return node.parentElement;
-                    }
-                }
-
-                // Check if text is split across adjacent text nodes
-                for (let i = 0; i < textNodes.length - 1; i++) {
-                    const combinedText = (textNodes[i].text + ' ' + textNodes[i + 1].text).trim();
-                    const normalizedCombined = combinedText.toLowerCase().replace(/\s+/g, ' ');
-                    const normalizedCombinedNoPunct = normalizedCombined.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
-
-                    if (normalizedCombined.includes(normalizedTarget) || normalizedCombinedNoPunct.includes(normalizedTargetNoPunct)) {
-                        // Return the parent container of both nodes
-                        let parent1 = textNodes[i].node.parentElement;
-                        let parent2 = textNodes[i + 1].node.parentElement;
-
-                        // Find common ancestor
-                        while (parent1 && parent1 !== document.body) {
-                            if (parent1.contains(parent2) || parent1 === parent2) {
-                                return parent1;
-                            }
-                            parent1 = parent1.parentElement;
-                        }
-
-                        // Fallback to first node's parent
-                        return textNodes[i].node.parentElement;
-                    }
-                }
-
-                return null;
-            }, { targetText: cleanText, normalizedTarget: normalizedText, normalizedTargetNoPunct: normalizedTextNoPunct });
-
-            if (element && element.asElement()) {
-                return element.asElement();
-            }
-        } catch (error) {
-            console.warn('Strategy 2 failed:', error.message);
-        }
-
-        // Strategy 3: Playwright's getByText as fallback
-        try {
-            const element = page.getByText(cleanText, { exact: false });
-            if (await element.count() > 0) return element.first();
-        } catch (error) {
-            console.warn('Strategy 3 failed:', error.message);
-        }
-
-        // Strategy 4: Try searching in iframes
+        // Strategy 2: Iframe search
         try {
             const frames = page.frames();
             for (const frame of frames) {
-                if (frame === page.mainFrame()) continue; // Skip main frame, already searched
+                if (frame === page.mainFrame()) continue;
                 try {
-                    const frameElement = await frame.evaluateHandle(({ targetText, normalizedTarget }) => {
-                        const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li');
-                        for (const el of elements) {
-                            const elText = (el.innerText || el.textContent || '').trim();
-                            const normalizedElText = elText.toLowerCase().replace(/\s+/g, ' ');
-                            if (normalizedElText.includes(normalizedTarget)) {
-                                return el;
-                            }
-                        }
-                        return null;
-                    }, { targetText: cleanText, normalizedTarget: normalizedText });
+                    const handle = await frame.evaluateHandle(`({ targetText }) => {
+                        ${fuzzyMatchLogic}
+                        return findInTree(document.body);
+                    }`, { targetText: text });
 
-                    if (frameElement && frameElement.asElement()) {
-                        return frameElement.asElement();
+                    if (handle && handle.asElement()) {
+                        console.log('[Screenshot] Text found in iframe');
+                        return handle.asElement();
                     }
-                } catch (frameError) {
+                } catch (e) {
                     // Continue to next frame
                 }
             }
         } catch (error) {
-            console.warn('Strategy 4 (iframe search) failed:', error.message);
+            console.warn('[Screenshot] Iframe search failed:', error.message);
         }
 
-        // Strategy 5: Try partial text match (first 30 characters)
-        if (cleanText.length > 30) {
-            try {
-                const partialText = cleanText.substring(0, 30).trim();
-                const element = page.getByText(partialText, { exact: false });
-                if (await element.count() > 0) {
-                    console.log(`Found partial match for text (first 30 chars): "${partialText}"`);
-                    return element.first();
-                }
-            } catch (error) {
-                // Ignore partial match errors
+        // Strategy 3: Playwright built-in as last resort
+        try {
+            const element = page.getByText(text, { exact: false });
+            if (await element.count() > 0) {
+                console.log('[Screenshot] Text found via Playwright getByText');
+                return element.first();
             }
+        } catch (error) {
+            // Ignore
         }
 
         return null;
@@ -1041,78 +1151,42 @@ class ScreenshotService {
                 // Ignore timeout
             }
 
-            // Find element containing the message (same logic as standard capture)
+            // Find element containing the message (using the new robust logic)
             let element = await this.findElementWithText(page, messageText);
 
             // If not found, try scrolling and searching again
             if (!element) {
-                console.log('Text not found on initial search, trying with page scroll...');
+                console.log('[CloudFlare Bypass] Text not found on initial search, trying with page scroll...');
                 await this.scrollPageToRevealContent(page);
                 await page.waitForTimeout(2000);
-                await page.evaluate(() => {
-                    window.dispatchEvent(new Event('scroll'));
-                });
-                await page.waitForTimeout(1000);
                 element = await this.findElementWithText(page, messageText);
             }
 
-            // If still not found, try partial matches
+            // If still not found, try clicking "show more"
             if (!element) {
-                console.log('Full text not found, trying partial matches...');
-                const partialLengths = [50, 40, 30, 20];
-                for (const len of partialLengths) {
-                    if (messageText.length > len) {
-                        const partialText = messageText.substring(0, len).trim();
-                        element = await this.findElementWithText(page, partialText);
-                        if (element) {
-                            console.log(`Found partial match (first ${len} chars): "${partialText}"`);
-                            break;
+                await page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button, a'));
+                    const showMorePatterns = [/show more/i, /read more/i, /view more/i, /expand/i];
+                    for (const btn of buttons) {
+                        if (showMorePatterns.some(p => p.test(btn.innerText || btn.textContent))) {
+                            btn.click();
                         }
                     }
-                }
+                });
+                await page.waitForTimeout(2000);
+                element = await this.findElementWithText(page, messageText);
             }
 
-            // If still not found, try key phrases
+            // Fallback to main content
             if (!element) {
-                console.log('Trying to find key phrases from the text...');
-                const words = messageText.split(/\s+/).filter(w => w.length >= 4);
-                if (words.length > 0) {
-                    element = await this.findElementWithText(page, words[0]);
-                    if (!element && words.length > 1) {
-                        const phrase = words.slice(0, Math.min(3, words.length)).join(' ');
-                        element = await this.findElementWithText(page, phrase);
-                    }
-                }
-            }
-
-            // Last resort: try to find main content area
-            if (!element) {
-                const isErrorPage = await this.detectErrorPage(page);
-                if (isErrorPage) {
-                    throw new Error(`Page appears to be blocked or inaccessible. Cannot capture screenshot.`);
-                }
-
-                try {
-                    const fallbackElement = await page.evaluateHandle(() => {
-                        const mainContent = document.querySelector('main, article, [role="main"]') ||
-                            document.querySelector('.content, .main-content, #content, #main');
-                        if (mainContent) {
-                            return mainContent;
-                        }
-                        return document.body;
-                    });
-
-                    if (fallbackElement && fallbackElement.asElement()) {
-                        console.log('Using fallback: capturing main content area');
-                        element = fallbackElement.asElement();
-                    }
-                } catch (e) {
-                    // Ignore fallback errors
-                }
+                console.log('[CloudFlare Bypass] Using fallback: capturing main content area');
+                element = await page.evaluateHandle(() => {
+                    return document.querySelector('main, article, [role="main"], .content, #content') || document.body;
+                });
             }
 
             if (!element) {
-                throw new Error(`Could not find text "${messageText}" on page`);
+                throw new Error(`Could not find text "${messageText}" on page even after bypass`);
             }
 
             // Scroll element into view
@@ -1206,305 +1280,176 @@ class ScreenshotService {
     }
 
     // Capture screenshot for a single message on a page
-    async captureMessage(url, messageText, messageId, retries = 2) {
+    async captureMessage(url, messageText, messageId, retries = 5) {
+        console.log(`[Screenshot] Starting capture for: "${messageText.substring(0, 50)}..."`);
         let page = null;
+        const isInsurance = this.isHighRiskDomain(url);
+        const domain = new URL(url).hostname;
 
-        try {
-            // Initialize browser context with retry
-            for (let i = 0; i < 3; i++) {
+        // Rate limiting: 3-5s for normal, 10s for insurance
+        const lastRequest = this.domainLastRequestTime.get(domain) || 0;
+        const minDelay = isInsurance ? 10000 : (3000 + Math.random() * 2000);
+        const timeSinceLast = Date.now() - lastRequest;
+        if (timeSinceLast < minDelay) {
+            const wait = minDelay - timeSinceLast;
+            console.log(`[Screenshot] Rate limiting: waiting ${Math.round(wait)}ms for ${domain}`);
+            await new Promise(resolve => setTimeout(resolve, wait));
+        }
+        this.domainLastRequestTime.set(domain, Date.now());
+
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                console.log(`[Screenshot] Attempt ${attempt}/${retries} for ${url}`);
+
+                // Initialize browser context
+                await this.init();
+
+                // Randomize viewport
+                const width = Math.floor(Math.random() * (1920 - 1366 + 1)) + 1366;
+                const height = Math.floor(Math.random() * (1080 - 768 + 1)) + 768;
+
+                page = await this.browserContext.newPage({
+                    viewport: { width, height },
+                    timeout: isInsurance ? 120000 : 60000
+                });
+
+                // Apply stealth and block analytics
+                await this.applyStealth(page);
+                await this.blockAnalytics(page);
+                await this.injectStabilizerScript(page);
+
+                // Navigation with increased timeout
+                const navTimeout = isInsurance ? 120000 : 60000;
+                console.log(`[Screenshot] Navigating to ${url}...`);
+
                 try {
-                    await this.init();
-                    break;
-                } catch (initError) {
-                    if (i === 2) throw initError;
-                    console.warn(`Browser context init failed, retrying... (${i + 1}/3)`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    this.browserContext = null; // Force recreation
+                    await page.goto(url, {
+                        waitUntil: 'networkidle',
+                        timeout: navTimeout
+                    });
+                } catch (e) {
+                    console.warn(`[Screenshot] networkidle failed, trying load...`);
+                    await page.goto(url, { waitUntil: 'load', timeout: navTimeout }).catch(() => { });
                 }
-            }
 
-            // Create page directly from persistent context
-            // Persistent context already has viewport and user agent configured
-            page = await this.browserContext.newPage({
-                timeout: 30000
-            });
+                console.log(`[Screenshot] Page loaded: ${url}`);
 
-            // Inject stabilizer script before navigation (works better than extension in headless mode)
-            await this.injectStabilizerScript(page);
+                // Intelligent waiting
+                const initialWait = isInsurance ? 15000 : 5000;
 
-            // LAYER 1: Setup network-level blocking BEFORE navigation
-            await this.consentHandler.setupNetworkBlocking(page);
+                // Random mouse movements during wait
+                for (let i = 0; i < 5; i++) {
+                    await page.mouse.move(Math.random() * width, Math.random() * height);
+                    await page.waitForTimeout(initialWait / 5);
+                }
 
-            // Navigate to page with more lenient wait strategy
-            // Use 'load' instead of 'networkidle' to avoid timeout on sites with continuous network activity
-            try {
-                await page.goto(url, {
-                    waitUntil: 'load',
-                    timeout: 60000  // Increased timeout to 60 seconds
-                });
-            } catch (timeoutError) {
-                // If load times out, try with domcontentloaded as fallback
-                console.warn(`Load timeout for ${url}, trying domcontentloaded...`);
-                await page.goto(url, {
-                    waitUntil: 'domcontentloaded',
-                    timeout: 60000
-                });
-            }
+                await page.waitForLoadState('domcontentloaded').catch(() => { });
+                await page.waitForLoadState('load').catch(() => { });
 
-            // Wait for Chrome extension/script to be ready and stabilize the page
-            await this.waitForExtensionReady(page);
+                // Check for substantial content
+                await page.waitForFunction(() => {
+                    return document.readyState === 'complete' && document.body.innerText.length > 1000;
+                }, { timeout: 10000 }).catch(() => { });
 
-            // Wait a bit for any animations and dynamic content
-            await page.waitForTimeout(2000);
+                // Neutralize cookie consent
+                await this.neutralizeCookieConsent(page);
 
-            // LAYER 3: Apply CSS overlay removal AFTER page load
-            await this.consentHandler.applyPostLoadLayers(page);
-            await page.waitForTimeout(500); // Let CSS take effect
-
-            // Check if page is an error/blocked page before proceeding
-            const isErrorPage = await this.detectErrorPage(page);
-            if (isErrorPage) {
-                const errorDetails = await page.evaluate(() => {
-                    const bodyText = document.body.innerText || document.body.textContent || '';
-                    const title = document.title || '';
-                    return { bodyText: bodyText.substring(0, 200), title };
-                }).catch(() => ({ bodyText: '', title: '' }));
-
-                throw new Error(`Page is blocked or inaccessible. Error: ${errorDetails.title || 'Access Denied'}. ${errorDetails.bodyText.substring(0, 100)}`);
-            }
-
-            // Close any popups, modals, or cookie banners before taking screenshot
-            await this.closePopups(page);
-
-            // Scroll page to reveal content that might be below the fold
-            await this.scrollPageToRevealContent(page);
-
-            // Wait for dynamic content to load after scrolling
-            await page.waitForTimeout(1500);
-
-            // Wait for network to be idle (for dynamically loaded content)
-            try {
-                await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { });
-            } catch (e) {
-                // Ignore timeout, continue anyway
-            }
-
-            // Find element containing the message (with retry and scrolling)
-            let element = await this.findElementWithText(page, messageText);
-
-            // If not found, try scrolling and searching again
-            if (!element) {
-                console.log('Text not found on initial search, trying with page scroll...');
-                await this.scrollPageToRevealContent(page);
+                // Scroll to trigger lazy loading
+                const scrollPositions = [0, 0.25, 0.5, 0.75, 1.0];
+                const scrollPos = scrollPositions[(attempt - 1) % scrollPositions.length];
+                await page.evaluate((pos) => {
+                    window.scrollTo(0, document.body.scrollHeight * pos);
+                }, scrollPos);
                 await page.waitForTimeout(2000);
-                // Wait for any lazy-loaded content
-                await page.evaluate(() => {
-                    // Trigger scroll events that might load content
-                    window.dispatchEvent(new Event('scroll'));
-                });
-                await page.waitForTimeout(1000);
-                element = await this.findElementWithText(page, messageText);
-            }
 
-            // If still not found, try searching for partial matches with different lengths
-            if (!element) {
-                console.log('Full text not found, trying partial matches...');
-                // Try progressively smaller chunks
-                const partialLengths = [50, 40, 30, 20];
-                for (const len of partialLengths) {
-                    if (messageText.length > len) {
-                        const partialText = messageText.substring(0, len).trim();
-                        element = await this.findElementWithText(page, partialText);
-                        if (element) {
-                            console.log(`Found partial match (first ${len} chars): "${partialText}"`);
-                            break;
+                // Find element
+                let element = await this.findElementWithText(page, messageText);
+
+                if (!element) {
+                    // Try clicking "show more" buttons
+                    await page.evaluate(() => {
+                        const buttons = Array.from(document.querySelectorAll('button, a'));
+                        const showMorePatterns = [/show more/i, /read more/i, /view more/i, /expand/i];
+                        for (const btn of buttons) {
+                            if (showMorePatterns.some(p => p.test(btn.innerText || btn.textContent))) {
+                                btn.click();
+                            }
                         }
-                    }
-                }
-            }
-
-            // If still not found, try searching for key phrases
-            if (!element) {
-                console.log('Trying to find key phrases from the text...');
-                // Extract key phrases (words of 4+ characters)
-                const words = messageText.split(/\s+/).filter(w => w.length >= 4);
-                if (words.length > 0) {
-                    // Try first significant word
-                    element = await this.findElementWithText(page, words[0]);
-                    if (!element && words.length > 1) {
-                        // Try a phrase of first 2-3 significant words
-                        const phrase = words.slice(0, Math.min(3, words.length)).join(' ');
-                        element = await this.findElementWithText(page, phrase);
-                    }
-                }
-            }
-
-            // Debug: Log page text if still not found
-            if (!element) {
-                const pageText = await page.evaluate(() => {
-                    return document.body.innerText || document.body.textContent || '';
-                }).catch(() => '');
-                console.log(`Page text preview (first 500 chars): ${pageText.substring(0, 500)}`);
-                console.log(`Searching for: "${messageText.substring(0, 100)}..."`);
-            }
-
-            // If exact text not found, try to find a related element with key terms
-            if (!element) {
-                // Extract key terms (important words, 5+ characters)
-                const keyTerms = messageText
-                    .split(/\s+/)
-                    .filter(word => word.length >= 5)
-                    .map(word => word.replace(/[.,;:!?'"()\-]/g, ''))
-                    .filter(word => word.length >= 5)
-                    .slice(0, 3); // Take top 3 key terms
-
-                if (keyTerms.length > 0) {
-                    console.log(`Exact text not found, searching for key terms: ${keyTerms.join(', ')}`);
-                    for (const term of keyTerms) {
-                        element = await this.findElementWithText(page, term);
-                        if (element) {
-                            console.log(`Found element containing key term: "${term}"`);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Last resort: try to find main content area (but only if not an error page)
-            if (!element) {
-                // Double-check it's not an error page before using fallback
-                const isErrorPage = await this.detectErrorPage(page);
-                if (isErrorPage) {
-                    throw new Error(`Page appears to be blocked or inaccessible. Cannot capture screenshot.`);
+                    });
+                    await page.waitForTimeout(2000);
+                    element = await this.findElementWithText(page, messageText);
                 }
 
-                try {
-                    const fallbackElement = await page.evaluateHandle(() => {
-                        // Find the main content area (article, main, or largest text container)
-                        const mainContent = document.querySelector('main, article, [role="main"]') ||
-                            document.querySelector('.content, .main-content, #content, #main');
-                        if (mainContent) {
-                            return mainContent;
-                        }
-                        // Fallback to body
-                        return document.body;
+                if (!element && attempt === retries) {
+                    console.log('[Screenshot] Using fallback: capturing main content area');
+                    element = await page.evaluateHandle(() => {
+                        return document.querySelector('main, article, [role="main"], .content, #content') || document.body;
+                    });
+                }
+
+                if (element) {
+                    const elementHandle = element.asElement ? element.asElement() : element;
+
+                    // Scroll into view
+                    await elementHandle.scrollIntoViewIfNeeded({ timeout: 10000 }).catch(() => { });
+                    await page.waitForTimeout(2000);
+
+                    // Highlight with box-shadow
+                    await page.evaluate((el) => {
+                        el.style.boxShadow = '0 0 0 3px rgba(255, 0, 0, 0.6)';
+                        el.style.outline = 'none';
+                    }, elementHandle);
+                    await page.waitForTimeout(500);
+
+                    // Capture
+                    const screenshotBuffer = await page.screenshot({
+                        type: 'png',
+                        fullPage: false
                     });
 
-                    if (fallbackElement && fallbackElement.asElement()) {
-                        console.log('Using fallback: capturing main content area');
-                        element = fallbackElement.asElement();
+                    // Quality check
+                    if (screenshotBuffer.length < 5000) {
+                        throw new Error('Screenshot too small, likely blank');
                     }
-                } catch (e) {
-                    // Ignore fallback errors
+
+                    console.log('[Screenshot] Captured successfully');
+
+                    const screenshotId = uuidv4();
+                    return {
+                        id: screenshotId,
+                        buffer: screenshotBuffer,
+                        metadata: {
+                            id: screenshotId,
+                            messageId,
+                            messageText,
+                            url,
+                            capturedAt: new Date().toISOString(),
+                            attempt,
+                            isInsurance,
+                            isFallback: !await this.findElementWithText(page, messageText) // Re-check if it was a fallback
+                        }
+                    };
                 }
-            }
 
-            if (!element) {
-                throw new Error(`Could not find text "${messageText}" on page`);
-            }
+                throw new Error('Text not found and fallback failed');
 
-            // Scroll element into view with timeout handling
-            try {
-                // Check if element is visible first
-                const isVisible = await element.isVisible().catch(() => false);
-                if (!isVisible) {
-                    // Try to get bounding box and scroll manually
-                    const box = await element.boundingBox().catch(() => null);
-                    if (box) {
-                        await page.evaluate(({ x, y }) => {
-                            window.scrollTo(x, y - 100);
-                        }, box);
-                        await page.waitForTimeout(500);
-                    } else {
-                        // Element might not be in viewport, try scrollIntoViewIfNeeded with shorter timeout
-                        await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => { });
-                        await page.waitForTimeout(500);
-                    }
+            } catch (error) {
+                console.error(`[Screenshot] Attempt ${attempt} failed: ${error.message}`);
+
+                if (attempt < retries) {
+                    const delay = Math.pow(2, attempt) * 1000;
+                    console.log(`[Screenshot] Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
                 } else {
-                    // Element is visible, just ensure it's in view
-                    await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => { });
-                    await page.waitForTimeout(500);
+                    console.error(`[Screenshot] Failed to find text after all attempts`);
+                    return null;
                 }
-            } catch (scrollError) {
-                // If scroll fails, try manual scroll
-                try {
-                    const box = await element.boundingBox().catch(() => null);
-                    if (box) {
-                        await page.evaluate(({ x, y }) => {
-                            window.scrollTo(x, y - 100);
-                        }, box);
-                        await page.waitForTimeout(500);
-                    }
-                } catch (manualScrollError) {
-                    console.warn('Could not scroll element into view, continuing anyway');
-                }
-            }
-
-            // Highlight the element subtly
-            await this.highlightElement(element);
-
-            // Get viewport dimensions for metadata
-            const viewport = page.viewportSize();
-
-            // Capture screenshot of entire visible viewport (not cropped)
-            const screenshotBuffer = await page.screenshot({
-                type: 'png',
-                fullPage: false  // Only capture visible viewport, not entire page
-            });
-
-            const screenshotId = uuidv4();
-
-            // Check if HTML evidence exists for this URL (from CloudFlare bypass cache)
-            const htmlEvidence = this.htmlEvidenceCache.get(url);
-
-            const metadata = {
-                id: screenshotId,
-                messageId: messageId,
-                messageText: messageText,
-                url: url,
-                dimensions: {
-                    width: viewport.width,
-                    height: viewport.height
-                },
-                capturedAt: new Date().toISOString(),
-                htmlEvidencePath: htmlEvidence ? htmlEvidence.filePath : null
-            };
-
-            return {
-                id: screenshotId,
-                buffer: screenshotBuffer,
-                metadata: metadata,
-                htmlEvidencePath: htmlEvidence ? htmlEvidence.filePath : null
-            };
-
-        } catch (error) {
-            console.error(`Error capturing screenshot for "${messageText}" at ${url}:`, error.message);
-
-            // If browser context crashed, reset it and retry once
-            if ((error.message.includes('Target page, context or browser has been closed') ||
-                error.message.includes('browser has been closed') ||
-                error.message.includes('Browser closed') ||
-                error.message.includes('Context closed')) && retries > 0) {
-                console.warn('Browser context crashed, resetting and retrying...');
-                this.browserContext = null; // Force context recreation
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait before retry
-                return this.captureMessage(url, messageText, messageId, retries - 1);
-            }
-
-            // If text not found, return null instead of throwing (allows graceful handling)
-            if (error.message.includes('Could not find text')) {
-                return null;
-            }
-
-            return null;
-        } finally {
-            // Always cleanup page (but keep context alive for reuse)
-            try {
+            } finally {
                 if (page) await page.close().catch(() => { });
-            } catch (e) {
-                console.warn('Error closing page:', e.message);
             }
         }
+
+        return null;
     }
 
     // Capture screenshots for multiple messages

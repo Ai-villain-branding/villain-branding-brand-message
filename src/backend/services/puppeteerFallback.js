@@ -69,7 +69,7 @@ class PuppeteerFallback {
             }).catch(() => { });
 
             // Wait for readable DOM
-            await page.waitForTimeout(8000);
+            await page.waitForTimeout(10000);
 
             // LAYER 4: Apply CSS
             await page.addStyleTag({
@@ -78,24 +78,38 @@ class PuppeteerFallback {
                     #CybotCookiebotDialog,
                     .qc-cmp2-container,
                     [class*="cookie-banner"],
-                    [class*="consent-banner"] {
+                    [class*="consent-banner"],
+                    .cookie-consent, .gdpr-banner, .privacy-notice {
                         display: none !important;
+                        visibility: hidden !important;
                     }
-                    body { overflow: auto !important; }
+                    body { overflow: auto !important; position: static !important; }
                 `
             });
 
+            // Scroll to trigger lazy loading
+            await page.evaluate(() => {
+                window.scrollTo(0, document.body.scrollHeight * 0.5);
+            });
+            await page.waitForTimeout(2000);
+
             // LAYER 6: Element screenshot
             console.log('[PuppeteerFallback] Capturing screenshot...');
-            const selectors = ['main', 'article', '[role="main"]', '#content', 'body'];
+            const selectors = [
+                'main', 'article', '[role="main"]', '#content', '.content', '.main-content', 'body'
+            ];
 
             let screenshot = null;
             for (const selector of selectors) {
                 try {
                     const element = await page.$(selector);
                     if (element) {
-                        screenshot = await element.screenshot();
-                        break;
+                        const isVisible = await element.isVisible();
+                        if (isVisible) {
+                            screenshot = await element.screenshot();
+                            console.log(`[PuppeteerFallback] Captured using selector: ${selector}`);
+                            break;
+                        }
                     }
                 } catch (e) {
                     continue;
@@ -103,7 +117,7 @@ class PuppeteerFallback {
             }
 
             if (!screenshot) {
-                screenshot = await page.screenshot({ fullPage: true });
+                screenshot = await page.screenshot({ fullPage: false });
             }
 
             console.log('[PuppeteerFallback] Screenshot captured successfully');

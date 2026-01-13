@@ -32,7 +32,7 @@ class SeleniumFallback {
             await driver.get(url);
 
             // Wait for page to load
-            await driver.sleep(8000);
+            await driver.sleep(10000);
 
             // Inject CMP neutralizer
             await driver.executeScript(`
@@ -56,13 +56,20 @@ class SeleniumFallback {
                     #CybotCookiebotDialog,
                     .qc-cmp2-container,
                     [class*="cookie-banner"],
-                    [class*="consent-banner"] {
+                    [class*="consent-banner"],
+                    .cookie-consent, .gdpr-banner, .privacy-notice {
                         display: none !important;
+                        visibility: hidden !important;
                     }
-                    body { overflow: auto !important; }
+                    body { overflow: auto !important; position: static !important; }
                 \`;
                 document.head.appendChild(style);
+                
+                // Scroll
+                window.scrollTo(0, document.body.scrollHeight * 0.5);
             `);
+
+            await driver.sleep(2000);
 
             // Take screenshot
             console.log('[SeleniumFallback] Capturing screenshot...');
