@@ -65,29 +65,64 @@ class ScreenshotService {
         await page.addInitScript(() => {
             // Override navigator.webdriver
             Object.defineProperty(navigator, 'webdriver', {
-                get: () => false,
+                get: () => undefined,
             });
+
+            // Delete any automation markers
+            delete navigator.__proto__.webdriver;
 
             // Mock chrome object
             window.chrome = {
-                runtime: {},
-                loadTimes: function () { },
-                csi: function () { },
-                app: {}
+                runtime: {
+                    PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' },
+                    PlatformArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' },
+                    PlatformNaclArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' },
+                    RequestUpdateCheckStatus: { THROTTLED: 'throttled', NO_UPDATE: 'no_update', UPDATE_AVAILABLE: 'update_available' },
+                    OnInstalledReason: { INSTALL: 'install', UPDATE: 'update', CHROME_UPDATE: 'chrome_update', SHARED_MODULE_UPDATE: 'shared_module_update' },
+                    OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+                    connect: function () { },
+                    sendMessage: function () { }
+                },
+                loadTimes: function () { return {}; },
+                csi: function () { return {}; },
+                app: { isInstalled: false, InstallState: { INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' } }
             };
 
-            // Mock plugins
+            // Mock plugins with realistic plugin list
             Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5],
+                get: () => {
+                    const plugins = [
+                        { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                        { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                        { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+                        { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: '' }
+                    ];
+                    plugins.length = 5;
+                    return plugins;
+                },
+            });
+
+            // Mock mimeTypes
+            Object.defineProperty(navigator, 'mimeTypes', {
+                get: () => {
+                    const mimes = [
+                        { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' }
+                    ];
+                    mimes.length = 1;
+                    return mimes;
+                },
             });
 
             // Mock permissions
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
+            const originalQuery = window.navigator.permissions?.query;
+            if (originalQuery) {
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: 'prompt' }) :
+                        originalQuery(parameters)
+                );
+            }
 
             // Mock hardwareConcurrency
             Object.defineProperty(navigator, 'hardwareConcurrency', {
@@ -97,6 +132,53 @@ class ScreenshotService {
             // Mock platform
             Object.defineProperty(navigator, 'platform', {
                 get: () => 'MacIntel',
+            });
+
+            // Mock languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en'],
+            });
+
+            Object.defineProperty(navigator, 'language', {
+                get: () => 'en-US',
+            });
+
+            // Mock deviceMemory
+            Object.defineProperty(navigator, 'deviceMemory', {
+                get: () => 8,
+            });
+
+            // Mock connection
+            Object.defineProperty(navigator, 'connection', {
+                get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10 }),
+            });
+
+            // Mock screen properties
+            Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+            Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+
+            // Mock WebGL vendor and renderer
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function (parameter) {
+                if (parameter === 37445) return 'Intel Inc.';
+                if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                return getParameter.call(this, parameter);
+            };
+
+            // Mock WebGL2 as well
+            if (WebGL2RenderingContext) {
+                const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+                WebGL2RenderingContext.prototype.getParameter = function (parameter) {
+                    if (parameter === 37445) return 'Intel Inc.';
+                    if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                    return getParameter2.call(this, parameter);
+                };
+            }
+
+            // Remove automation-related properties
+            const automationProps = ['_phantom', '_selenium', 'callPhantom', '__nightmare', 'domAutomation', 'domAutomationController'];
+            automationProps.forEach(prop => {
+                try { delete window[prop]; } catch (e) { }
             });
         });
     }
@@ -369,7 +451,7 @@ class ScreenshotService {
         }
     }
 
-    // Detect if the page is an error/blocked page
+    // Detect if the page is an error/blocked page or bot detection challenge
     async detectErrorPage(page) {
         try {
             // First check if it's a Cloudflare challenge (more specific)
@@ -383,7 +465,7 @@ class ScreenshotService {
                 const title = (document.title || '').toLowerCase();
                 const url = window.location.href.toLowerCase();
 
-                // Common error page indicators (excluding Cloudflare-specific ones)
+                // Common error page indicators
                 const errorPatterns = [
                     'access denied',
                     'access forbidden',
@@ -400,23 +482,56 @@ class ScreenshotService {
                     'err_',
                 ];
 
+                // Bot detection / CAPTCHA patterns
+                const botDetectionPatterns = [
+                    'we need to validate',
+                    'verify you are human',
+                    'prove you\'re not a robot',
+                    'i\'m not a robot',
+                    'complete the captcha',
+                    'security check',
+                    'please verify',
+                    'bot detection',
+                    'unusual traffic',
+                    'automated access',
+                    'suspicious activity',
+                    'additional security check',
+                    'solve the captcha',
+                    'human verification',
+                    'checking your browser',
+                    'browser plugin that\'s stopping javascript',
+                    'you\'re using a vpn',
+                    'moving through the site at super-human speed',
+                    'oops! we need to validate'
+                ];
+
                 // Check title, body text, and URL for error indicators
                 for (const pattern of errorPatterns) {
                     if (title.includes(pattern) || bodyText.includes(pattern) || url.includes(pattern)) {
-                        return true;
+                        return { isError: true, reason: `Error pattern: ${pattern}` };
+                    }
+                }
+
+                // Check for bot detection patterns
+                for (const pattern of botDetectionPatterns) {
+                    if (bodyText.includes(pattern)) {
+                        return { isError: true, reason: `Bot detection: ${pattern}` };
                     }
                 }
 
                 // Check for very short content (error pages are often minimal)
                 const textLength = bodyText.trim().length;
                 if (textLength < 200 && (title.includes('error') || title.includes('denied') || title.includes('forbidden'))) {
-                    return true;
+                    return { isError: true, reason: 'Short content with error title' };
                 }
 
-                return false;
+                return { isError: false };
             });
 
-            return errorIndicators;
+            if (errorIndicators.isError) {
+                console.log(`[Screenshot] Detected blocked/bot detection page: ${errorIndicators.reason}`);
+            }
+            return errorIndicators.isError;
         } catch (error) {
             // If detection fails, assume it's not an error page (better to try than to skip)
             return false;
@@ -1353,6 +1468,13 @@ class ScreenshotService {
 
                 // Neutralize cookie consent
                 await this.neutralizeCookieConsent(page);
+
+                // Check if we've hit a bot detection page
+                const isBlockedPage = await this.detectErrorPage(page);
+                if (isBlockedPage) {
+                    console.warn(`[Screenshot] Bot detection/blocked page detected for ${url}, skipping...`);
+                    throw new Error('Bot detection page detected');
+                }
 
                 // Scroll to trigger lazy loading
                 const scrollPositions = [0, 0.25, 0.5, 0.75, 1.0];

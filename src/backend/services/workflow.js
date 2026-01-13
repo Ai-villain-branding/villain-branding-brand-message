@@ -531,21 +531,61 @@ async function fetchHtml(url, usePlaywright = false) {
 
             const context = await browser.newContext({
                 userAgent: userAgent,
-                viewport: { width: 1440, height: 900 }
+                viewport: { width: 1440, height: 900 },
+                locale: 'en-US',
+                timezoneId: 'America/New_York'
             });
 
             const page = await context.newPage();
 
-            // Apply stealth
+            // Apply comprehensive stealth
             await page.addInitScript(() => {
-                Object.defineProperty(navigator, 'webdriver', { get: () => false });
-                window.chrome = { runtime: {} };
+                // Override navigator.webdriver
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                delete navigator.__proto__.webdriver;
+
+                // Mock chrome object
+                window.chrome = {
+                    runtime: { connect: function () { }, sendMessage: function () { } },
+                    loadTimes: function () { return {}; },
+                    csi: function () { return {}; },
+                    app: { isInstalled: false }
+                };
+
+                // Mock plugins
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => {
+                        const plugins = [
+                            { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
+                            { name: 'Native Client', filename: 'internal-nacl-plugin' }
+                        ];
+                        plugins.length = 2;
+                        return plugins;
+                    }
+                });
+
+                // Mock permissions
+                if (navigator.permissions?.query) {
+                    const originalQuery = navigator.permissions.query;
+                    navigator.permissions.query = (params) =>
+                        params.name === 'notifications' ? Promise.resolve({ state: 'prompt' }) : originalQuery(params);
+                }
+
+                // Mock other properties
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+                // Remove automation markers
+                ['_phantom', '_selenium', 'callPhantom', '__nightmare', 'domAutomation'].forEach(prop => {
+                    try { delete window[prop]; } catch (e) { }
+                });
             });
 
             // Block analytics to speed up loading
             await page.route('**/*', (route) => {
                 const url = route.request().url().toLowerCase();
-                const blockedDomains = ['google-analytics.com', 'googletagmanager.com', 'facebook.com/tr', 'doubleclick.net'];
+                const blockedDomains = ['google-analytics.com', 'googletagmanager.com', 'facebook.com/tr', 'doubleclick.net', 'hotjar.com'];
                 if (blockedDomains.some(d => url.includes(d))) {
                     return route.abort();
                 }
@@ -560,6 +600,12 @@ async function fetchHtml(url, usePlaywright = false) {
             // Wait for page to stabilize
             await page.waitForTimeout(3000);
 
+            // Random mouse movements to appear human
+            for (let i = 0; i < 3; i++) {
+                await page.mouse.move(Math.random() * 1440, Math.random() * 900);
+                await page.waitForTimeout(500);
+            }
+
             // Scroll to trigger lazy loading
             await page.evaluate(() => {
                 window.scrollTo(0, document.body.scrollHeight * 0.5);
@@ -569,6 +615,26 @@ async function fetchHtml(url, usePlaywright = false) {
                 window.scrollTo(0, 0);
             });
             await page.waitForTimeout(2000);
+
+            // Check for bot detection page
+            const isBlocked = await page.evaluate(() => {
+                const bodyText = (document.body.innerText || '').toLowerCase();
+                const botPatterns = [
+                    'we need to validate',
+                    'verify you are human',
+                    'prove you\'re not a robot',
+                    'complete the captcha',
+                    'security check',
+                    'unusual traffic',
+                    'checking your browser'
+                ];
+                return botPatterns.some(p => bodyText.includes(p));
+            });
+
+            if (isBlocked) {
+                console.warn(`[fetchHtml] Bot detection page detected for ${url}`);
+                throw new Error('Bot detection page - cannot extract content');
+            }
 
             // Wait for content to appear
             try {
