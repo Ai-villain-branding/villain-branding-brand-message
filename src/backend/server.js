@@ -661,7 +661,8 @@ app.post('/api/screenshots/batch', async (req, res) => {
             const pendingData = {
                 company_id: task.companyId,
                 message_id: task.messageId,
-                page_url: task.url,
+                original_url: task.url,
+                message_content: task.text,
                 status: 'pending',
                 attempt_count: 0,
                 batch_id: batchId,
@@ -791,7 +792,7 @@ app.get('/api/screenshots/status', async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('screenshots')
-            .select('id, status, image_url, error_message, attempt_count, page_url, message_id')
+            .select('id, status, image_url, error_message, attempt_count, original_url, message_id')
             .in('id', idArray);
 
         if (error) throw error;
