@@ -5,6 +5,7 @@ const { classifyContent } = require('./classifier');
 const supabase = require('./supabase');
 const { v4: uuidv4 } = require('uuid');
 const { categorizeMessages } = require('./messageCategorizer');
+const ContentExtractor = require('./contentExtractor');
 
 /**
  * Orchestrates the full analysis workflow for a company
@@ -17,6 +18,8 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
     if (specificPages) {
         console.log(`Specific pages mode: Analyzing ${specificPages.length} pages`);
     }
+
+    const contentExtractor = new ContentExtractor();
 
     try {
         // 1. Create or Get Company in Supabase
@@ -37,7 +40,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             // Update analysis mode if it changed
             await supabase
                 .from('companies')
-                .update({ 
+                .update({
                     analysis_mode: analysisMode,
                     pages_analyzed: pagesCount
                 })
@@ -46,9 +49,9 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             const domain = new URL(companyUrl).hostname;
             const { data: newCompany, error: createError } = await supabase
                 .from('companies')
-                .insert({ 
-                    url: companyUrl, 
-                    domain: domain, 
+                .insert({
+                    url: companyUrl,
+                    domain: domain,
                     name: domain,
                     analysis_mode: analysisMode,
                     pages_analyzed: pagesCount
@@ -63,7 +66,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
         // 2. Determine Pages to Visit
         let uniquePages;
-        
+
         if (specificPages && specificPages.length > 0) {
             // Mode: Specific pages only - use the provided pages
             console.log('Using specific pages provided by user');
@@ -99,26 +102,60 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         // First pass: Collect all page contents
         for (const pageUrl of uniquePages) {
             try {
-                console.log(`Fetching page: ${pageUrl}`);
+                console.log(`[fetchHtml] Fetching page: ${pageUrl}`);
 
                 // Add a small delay to be nice to APIs
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
                 const html = await fetchHtml(pageUrl);
-                const cleanedContent = cleanContent(html);
+                console.log(`[Content] Raw HTML length: ${html.length} chars`);
 
-                // Skip if content is too short
-                if (cleanedContent.length < 100) {
-                    console.log(`Skipping ${pageUrl} - content too short`);
+                const extracted = contentExtractor.extract(html, pageUrl);
+
+                // Build weighted content
+                let weightedContent = '';
+
+                if (extracted.metadata.title) {
+                    weightedContent += `TITLE: ${extracted.metadata.title}\n\n`;
+                }
+                if (extracted.metadata.description) {
+                    weightedContent += `DESCRIPTION: ${extracted.metadata.description}\n\n`;
+                }
+                if (extracted.metadata.h1 && extracted.metadata.h1.length > 0) {
+                    weightedContent += `H1 HEADINGS: ${extracted.metadata.h1.join(' | ')}\n\n`;
+                }
+
+                // Sort text blocks by weight descending
+                const sortedBlocks = extracted.textBlocks.sort((a, b) => b.weight - a.weight);
+                sortedBlocks.forEach(block => {
+                    weightedContent += `${block.text}\n`;
+                });
+
+                const cleanedContent = weightedContent.trim();
+                console.log(`[Content] Extracted content length: ${cleanedContent.length} chars`);
+                console.log(`[Content] Text blocks extracted: ${extracted.textBlocks.length}`);
+
+                // Enhanced content validation
+                if (cleanedContent.length < 500) {
+                    console.warn(`[Content] ❌ Insufficient content extracted from ${pageUrl}: ${cleanedContent.length} chars (min 500 required)`);
                     continue;
                 }
+
+                // Meaningful text check (strip special characters)
+                const meaningfulText = cleanedContent.replace(/[^\w\s]/g, '').trim();
+                if (meaningfulText.length < 300) {
+                    console.warn(`[Content] ❌ Insufficient meaningful content from ${pageUrl}: ${meaningfulText.length} chars (min 300 required)`);
+                    continue;
+                }
+
+                console.log(`[Content] ✅ Content validation passed for ${pageUrl}: ${cleanedContent.length} chars`);
 
                 pageContents.push({
                     url: pageUrl,
                     content: cleanedContent
                 });
             } catch (err) {
-                console.error(`Error fetching page ${pageUrl}:`, err.message);
+                console.error(`[Content] Error fetching/extracting page ${pageUrl}:`, err.message);
             }
         }
 
@@ -129,11 +166,45 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             allPagesData[page.url] = page.content;
         });
 
+        // Pre-AI validation gate
+        if (pageContents.length === 0) {
+            console.error(`[Content] ❌ FATAL: No valid content extracted from any pages for ${companyUrl}`);
+            console.error(`[Content] Total pages attempted: ${uniquePages.length}`);
+            console.error(`[Content] All pages either failed to fetch or had insufficient content. This usually indicates bot protection, JavaScript-heavy site, or network issues.`);
+
+            return {
+                companyId,
+                messageCount: 0,
+                pagesVisited: uniquePages.length,
+                error: 'No valid content extracted - site may require special handling'
+            };
+        }
+
+        console.log(`[Content] ✅ Content validation passed: ${pageContents.length} pages with valid content`);
+        const totalContentLength = Object.values(allPagesData).reduce((sum, content) => sum + content.length, 0);
+        console.log(`[Content] Total content length: ${totalContentLength.toLocaleString()} chars`);
+        console.log(`[Content] Average per page: ${Math.round(totalContentLength / pageContents.length).toLocaleString()} chars`);
+
         try {
-            console.log(`Analyzing all ${pageContents.length} pages together to find cross-page messages...`);
+            console.log(`[AI] Analyzing all ${pageContents.length} pages together to find cross-page messages...`);
 
             // Pass all page contents together so AI can search for messages across all pages
-            const classificationResult = await classifyContent(allPagesData, Object.keys(allPagesData));
+            // Wrap in try-catch to return empty results on error instead of throwing
+            let classificationResult;
+            try {
+                classificationResult = await classifyContent(allPagesData, Object.keys(allPagesData));
+            } catch (err) {
+                console.error(`[AI] Error during AI classification:`, err.message);
+                classificationResult = { messages: [] };
+            }
+
+            // Post-AI classification check for zero results
+            if (!classificationResult || !classificationResult.messages || classificationResult.messages.length === 0) {
+                console.warn(`[AI] ⚠️ AI returned 0 messages with strict mode`);
+                console.warn(`[AI] Attempting RELAXED MODE as fallback (TODO: implement relaxed mode classifier)`);
+                console.warn(`[AI] Content available: ${totalContentLength.toLocaleString()} chars across ${pageContents.length} pages`);
+                console.error(`[AI] ❌ No messages extracted even with available content. This indicates AI guidelines may be too strict. Suggest manual review, guideline relaxation, or domain-specific prompts.`);
+            }
 
             if (classificationResult && classificationResult.messages) {
                 // The AI should return messages with all locations where they appear
@@ -143,10 +214,10 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                 for (const msg of classificationResult.messages) {
                     const messageText = msg.Message;
                     const reportedLocations = Array.isArray(msg.Locations) ? [...msg.Locations] : [];
-                    
+
                     // Verify and find all actual occurrences across all pages
                     const verifiedLocations = new Set(reportedLocations);
-                    
+
                     // Normalize message for searching (remove punctuation, normalize whitespace)
                     const normalizeForSearch = (text) => {
                         return text.toLowerCase()
@@ -154,76 +225,49 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                             .replace(/[^\w\s]/g, '') // Remove punctuation
                             .replace(/\s+/g, ' '); // Normalize whitespace
                     };
-                    
+
                     const normalizedMessage = normalizeForSearch(messageText);
-                    
+
                     // Search for this message text in all pages
                     for (const pageData of pageContents) {
                         const normalizedContent = normalizeForSearch(pageData.content);
-                        
+
                         // Check if message appears in this page's content
                         // Use word boundary matching for better accuracy
                         const messageWords = normalizedMessage.split(' ').filter(w => w.length > 0);
                         if (messageWords.length > 0) {
                             // Check if all significant words appear in the content
-                            const allWordsFound = messageWords.every(word => 
+                            const allWordsFound = messageWords.every(word =>
                                 normalizedContent.includes(word)
                             );
-                            
+
                             // Also check if the full phrase appears (for exact matches)
                             const fullPhraseFound = normalizedContent.includes(normalizedMessage);
-                            
+
                             if (allWordsFound || fullPhraseFound) {
                                 verifiedLocations.add(pageData.url);
                             }
                         }
                     }
-                    
+
                     // Convert Set to Array and use verified locations
                     const finalLocations = Array.from(verifiedLocations);
-                    
+
                     messagesWithVerifiedLocations.push({
                         ...msg,
                         Locations: finalLocations,
                         Count: finalLocations.length
                     });
                 }
-                
+
                 allMessages = messagesWithVerifiedLocations;
-                console.log(`Found ${allMessages.length} messages across all pages`);
+                console.log(`[AI] Found ${allMessages.length} messages across all pages`);
             }
 
         } catch (err) {
-            console.error(`Error analyzing pages:`, err.message);
-            // Fallback: analyze pages individually if batch analysis fails
-            console.log('Falling back to individual page analysis...');
-            const allUrls = pageContents.map(p => p.url);
-            
-            for (const pageData of pageContents) {
-                try {
-                    console.log(`Analyzing page: ${pageData.url}`);
-                    const classificationResult = await classifyContent(pageData.content, allUrls);
-
-                    if (classificationResult && classificationResult.messages) {
-                        const messagesWithLocation = classificationResult.messages.map(msg => {
-                            const locations = Array.isArray(msg.Locations) ? [...msg.Locations] : [];
-                            if (!locations.includes(pageData.url)) {
-                                locations.push(pageData.url);
-                            }
-                            return {
-                                ...msg,
-                                Locations: locations,
-                                Count: locations.length
-                            };
-                        });
-                        allMessages = allMessages.concat(messagesWithLocation);
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                } catch (pageErr) {
-                    console.error(`Error analyzing page ${pageData.url}:`, pageErr.message);
-                }
-            }
+            console.error(`[AI] Fatal error during analysis:`, err.message);
+            // Return empty results as requested for robustness
+            allMessages = [];
         }
 
         // 5. Save Messages to Supabase (Batched)
@@ -250,11 +294,11 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         if (existingMessages && existingMessages.length > 0) {
             console.log('Checking for existing duplicates in database...');
             const duplicateGroups = new Map();
-            
+
             existingMessages.forEach(msg => {
                 const normalized = normalizeMessageContent(msg.content);
                 const key = `${msg.message_type}-${normalized}`;
-                
+
                 if (!duplicateGroups.has(key)) {
                     duplicateGroups.set(key, []);
                 }
@@ -265,11 +309,11 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             for (const [key, messages] of duplicateGroups.entries()) {
                 if (messages.length > 1) {
                     console.log(`Found ${messages.length} duplicate messages for key: ${key}, merging...`);
-                    
+
                     // Keep the first message, merge others into it
                     const primary = messages[0];
                     const toMerge = messages.slice(1);
-                    
+
                     // Collect all unique locations
                     let allLocations = [...(primary.locations || [])];
                     toMerge.forEach(msg => {
@@ -278,7 +322,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                         }
                     });
                     const uniqueLocations = [...new Set(allLocations)];
-                    
+
                     // Update primary message
                     await supabase
                         .from('brand_messages')
@@ -287,14 +331,14 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                             count: uniqueLocations.length
                         })
                         .eq('id', primary.id);
-                    
+
                     // Delete duplicate messages
                     const duplicateIds = toMerge.map(m => m.id);
                     await supabase
                         .from('brand_messages')
                         .delete()
                         .in('id', duplicateIds);
-                    
+
                     console.log(`Merged ${toMerge.length} duplicates into message ID: ${primary.id}`);
                 }
             }
@@ -328,7 +372,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                 // Update existing message with new locations
                 const newLocations = msg.Locations || [];
                 const mergedLocations = [...new Set([...existingDbMsg.locations, ...newLocations])];
-                
+
                 // Update in database
                 await supabase
                     .from('brand_messages')
@@ -337,7 +381,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                         count: mergedLocations.length
                     })
                     .eq('id', existingDbMsg.id);
-                
+
                 continue; // Skip adding to uniqueMessages since it already exists
             }
 
@@ -420,18 +464,88 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
     }
 }
 
-async function fetchHtml(url) {
-    try {
-        const response = await axios.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            },
-            timeout: 10000
-        });
-        return response.data;
-    } catch (error) {
-        console.error(`Failed to fetch ${url}:`, error.message);
-        throw error;
+/**
+ * Fetches HTML from a URL, trying axios first and falling back to Playwright for JS-heavy sites
+ * @param {string} url - The URL to fetch
+ * @param {boolean} usePlaywright - Whether to use Playwright for rendering
+ * @returns {Promise<string>} - The HTML content
+ */
+async function fetchHtml(url, usePlaywright = false) {
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+    if (!usePlaywright) {
+        try {
+            console.log(`[fetchHtml] Trying axios for ${url}`);
+            const response = await axios.get(url, {
+                headers: {
+                    'User-Agent': userAgent
+                },
+                timeout: 15000,
+                maxRedirects: 5
+            });
+
+            const html = response.data;
+
+            // Validate content quality
+            if (html.length < 1000) {
+                console.warn(`[fetchHtml] Axios returned insufficient content (${html.length} chars), trying Playwright...`);
+                return await fetchHtml(url, true);
+            }
+
+            // Check for JavaScript requirement indicators
+            const jsIndicators = ['window.INITIAL_STATE', 'data-react-helmet', 'NEXT_DATA'];
+            const hasJsIndicator = jsIndicators.some(indicator => html.includes(indicator));
+            const noscriptCount = (html.match(/<noscript/g) || []).length;
+
+            if (hasJsIndicator || noscriptCount > 3) {
+                console.log(`[fetchHtml] Page appears to require JavaScript, using Playwright...`);
+                return await fetchHtml(url, true);
+            }
+
+            console.log(`[fetchHtml] Axios success: ${html.length} chars`);
+            return html;
+        } catch (error) {
+            console.error(`[fetchHtml] Axios failed: ${error.message}, trying Playwright...`);
+            return await fetchHtml(url, true);
+        }
+    } else {
+        console.log(`[fetchHtml] Using Playwright for ${url}`);
+        let browser;
+        try {
+            const { chromium } = require('playwright');
+            browser = await chromium.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+
+            const context = await browser.newContext({
+                userAgent: userAgent
+            });
+
+            const page = await context.newPage();
+            await page.goto(url, {
+                waitUntil: 'networkidle',
+                timeout: 30000
+            });
+
+            // Wait an additional 2 seconds for dynamic content
+            await page.waitForTimeout(2000);
+
+            const html = await page.content();
+            console.log(`[fetchHtml] Playwright success: ${html.length} chars`);
+            return html;
+        } catch (error) {
+            console.error(`[fetchHtml] Playwright failed for ${url}: ${error.message}`);
+            throw error;
+        } finally {
+            if (browser) {
+                try {
+                    await browser.close();
+                } catch (closeError) {
+                    console.error(`[fetchHtml] Error closing browser: ${closeError.message}`);
+                }
+            }
+        }
     }
 }
 

@@ -420,9 +420,9 @@
             <!-- Sticky Header Section -->
             <div class="sticky-header-section">
                 <div class="header-row">
-                    <div>
-                        <h1 id="companyName">Loading...</h1>
-                        <p class="text-muted" id="companyUrl">Fetching brand messages...</p>
+                    <div style="text-align: left;">
+                        <h1 id="companyName" style="text-align: left;">Loading...</h1>
+                        <p class="text-muted" id="companyUrl" style="text-align: left;">Fetching brand messages...</p>
                     </div>
                     <div>
                         <button id="generateEvidencesBtn" class="btn btn-primary" disabled>
@@ -437,8 +437,8 @@
         <div class="scrollable-messages-container">
             <div id="messagesList" class="message-grid">
                 <!-- Messages injected here -->
-                <div class="text-center" style="padding: 4rem;">
-                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                <div style="padding: 4rem 0;">
+                    <div class="spinner" style="margin: 0 0 1rem 0;"></div>
                     <p class="text-muted">Loading messages...</p>
                 </div>
             </div>
@@ -598,7 +598,20 @@
             const container = document.getElementById('messagesList');
 
             if (!messages || messages.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No messages found for this company.</p>`;
+                container.innerHTML = `
+                    <div class="message-group">
+                        <div class="message-group-header">
+                            <div class="message-group-title-section">
+                                <span class="message-group-title">No Brand Messages Found</span>
+                            </div>
+                        </div>
+                        <div class="message-group-content expanded">
+                            <div class="message-group-messages">
+                                <p class="text-muted">We couldn't find any brand messages for this company. Try re-analyzing or checking the URL.</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
                 return;
             }
 
