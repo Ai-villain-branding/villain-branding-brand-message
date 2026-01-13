@@ -75,10 +75,11 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         } else {
             // Mode: Full website scraping - discover pages automatically
             console.log('Fetching homepage for link analysis...');
-            const homepageHtml = await fetchHtml(companyUrl);
+            const fetchResult = await fetchHtml(companyUrl);
+            const homepageHtml = fetchResult.html;
 
             console.log('Analyzing links...');
-            const linkAnalysisResult = await analyzeLinks(homepageHtml, companyUrl);
+            const linkAnalysisResult = await analyzeLinks(homepageHtml, companyUrl, fetchResult.links);
             console.log('Link Analysis Result:', JSON.stringify(linkAnalysisResult, null, 2));
 
             // Determine Pages to Visit (Analyze all pages)
@@ -107,10 +108,20 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                 // Add a small delay to be nice to APIs
                 await new Promise(resolve => setTimeout(resolve, 1000));
 
-                const html = await fetchHtml(pageUrl);
+                const fetchResult = await fetchHtml(pageUrl);
+                const html = fetchResult.html;
                 console.log(`[Content] Raw HTML length: ${html.length} chars`);
 
-                const extracted = contentExtractor.extract(html, pageUrl);
+                let extracted;
+                if (fetchResult.extractedContent && fetchResult.extractedContent.length > 500) {
+                    console.log(`[Content] Using pre-extracted content from Playwright (${fetchResult.extractedContent.length} chars)`);
+                    extracted = {
+                        metadata: fetchResult.metadata || { title: '', description: '', h1: [] },
+                        textBlocks: [{ text: fetchResult.extractedContent, type: 'pre-extracted', weight: 5 }]
+                    };
+                } else {
+                    extracted = contentExtractor.extract(html, pageUrl);
+                }
 
                 // Build weighted content
                 let weightedContent = '';
@@ -468,7 +479,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
  * Fetches HTML from a URL, trying axios first and falling back to Playwright for JS-heavy sites
  * @param {string} url - The URL to fetch
  * @param {boolean} usePlaywright - Whether to use Playwright for rendering
- * @returns {Promise<string>} - The HTML content
+ * @returns {Promise<Object>} - Object containing html, extractedContent, and links
  */
 async function fetchHtml(url, usePlaywright = false) {
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -503,7 +514,7 @@ async function fetchHtml(url, usePlaywright = false) {
             }
 
             console.log(`[fetchHtml] Axios success: ${html.length} chars`);
-            return html;
+            return { html, extractedContent: null, links: null };
         } catch (error) {
             console.error(`[fetchHtml] Axios failed: ${error.message}, trying Playwright...`);
             return await fetchHtml(url, true);
@@ -519,21 +530,108 @@ async function fetchHtml(url, usePlaywright = false) {
             });
 
             const context = await browser.newContext({
-                userAgent: userAgent
+                userAgent: userAgent,
+                viewport: { width: 1440, height: 900 }
             });
 
             const page = await context.newPage();
-            await page.goto(url, {
-                waitUntil: 'networkidle',
-                timeout: 30000
+
+            // Apply some stealth
+            await page.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
             });
 
-            // Wait an additional 2 seconds for dynamic content
-            await page.waitForTimeout(2000);
+            await page.goto(url, {
+                waitUntil: 'networkidle',
+                timeout: 60000
+            });
+
+            // Wait for content to stabilize
+            await page.waitForTimeout(5000);
+
+            // Extract content and links within the browser context
+            const extractionResult = await page.evaluate(() => {
+                const results = {
+                    content: '',
+                    links: [],
+                    title: document.title,
+                    description: document.querySelector('meta[name="description"]')?.content || ''
+                };
+
+                const seenLinks = new Set();
+                const baseHost = window.location.hostname;
+
+                const walk = (node, depth = 0) => {
+                    if (depth > 20) return; // Prevent infinite recursion
+
+                    // Extract text from visible elements
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        const style = window.getComputedStyle(node);
+                        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
+
+                        // Capture links
+                        if (node.tagName === 'A' && node.href) {
+                            try {
+                                const url = new URL(node.href);
+                                if (url.hostname === baseHost && !seenLinks.has(node.href)) {
+                                    seenLinks.add(node.href);
+                                    results.links.push({
+                                        text: node.innerText.trim().substring(0, 100),
+                                        href: node.href
+                                    });
+                                }
+                            } catch (e) { }
+                        }
+
+                        // Capture text from headings and paragraphs
+                        const tag = node.tagName;
+                        if (['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'P', 'LI', 'SPAN', 'DIV'].includes(tag)) {
+                            const text = node.innerText.trim();
+                            if (text && text.length > 20 && text.length < 2000) {
+                                // Avoid duplicates from parent/child
+                                if (!results.content.includes(text.substring(0, 50))) {
+                                    results.content += (tag.startsWith('H') ? `\n[${tag}] ` : '\n') + text + '\n';
+                                }
+                            }
+                        }
+
+                        // Traverse Shadow DOM
+                        if (node.shadowRoot) {
+                            walk(node.shadowRoot, depth + 1);
+                        }
+
+                        // Traverse Iframes (if same-origin)
+                        if (node.tagName === 'IFRAME') {
+                            try {
+                                if (node.contentDocument) {
+                                    walk(node.contentDocument, depth + 1);
+                                }
+                            } catch (e) { }
+                        }
+                    }
+
+                    // Process children
+                    for (let child of node.childNodes) {
+                        walk(child, depth + 1);
+                    }
+                };
+
+                walk(document.body);
+                return results;
+            });
 
             const html = await page.content();
-            console.log(`[fetchHtml] Playwright success: ${html.length} chars`);
-            return html;
+            console.log(`[fetchHtml] Playwright success: ${html.length} chars HTML, ${extractionResult.content.length} chars extracted content`);
+
+            return {
+                html,
+                extractedContent: extractionResult.content,
+                links: extractionResult.links,
+                metadata: {
+                    title: extractionResult.title,
+                    description: extractionResult.description
+                }
+            };
         } catch (error) {
             console.error(`[fetchHtml] Playwright failed for ${url}: ${error.message}`);
             throw error;

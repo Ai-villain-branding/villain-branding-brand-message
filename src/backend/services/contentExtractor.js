@@ -7,7 +7,6 @@ class ContentExtractor {
             'script',
             'style',
             'noscript',
-            'iframe',
             'svg',
             'canvas',
 
@@ -114,18 +113,24 @@ class ContentExtractor {
             { selector: 'p', type: 'paragraph', weight: 2 },
             { selector: 'li', type: 'list', weight: 2 },
             { selector: '[class*="tagline"]', type: 'tagline', weight: 5 },
-            { selector: '[class*="slogan"]', type: 'slogan', weight: 5 }
+            { selector: '[class*="slogan"]', type: 'slogan', weight: 5 },
+            { selector: 'section', type: 'section', weight: 2 },
+            { selector: 'article', type: 'article', weight: 3 },
+            { selector: '.main', type: 'main', weight: 2 }
         ];
 
         contentSelectors.forEach(({ selector, type, weight }) => {
             $(selector).each((_, el) => {
                 const text = this.normalizeText($(el).text());
 
-                // Skip very short or very long text
-                if (text.length < 10 || text.length > 500) return;
+                // Relaxed constraints: 5 to 2000 chars
+                if (text.length < 5 || text.length > 2000) return;
 
                 // Skip if it's just a link
                 if ($(el).is('a') && $(el).text().length === text.length) return;
+
+                // Avoid duplicates
+                if (texts.some(t => t.text.includes(text.substring(0, 50)))) return;
 
                 texts.push({
                     text: text,
@@ -156,6 +161,33 @@ class ContentExtractor {
 
         // Extract text with context
         const textBlocks = this.extractTextWithContext($, contentElement);
+
+        // Fallback: If too little content, try to find the largest text container
+        if (textBlocks.length === 0 || textBlocks.reduce((sum, b) => sum + b.text.length, 0) < 500) {
+            const bodyText = this.normalizeText($('body').text());
+            if (bodyText.length > 500) {
+                // Find the element with the most text that isn't the body itself
+                let bestElement = $('body');
+                let maxLen = 0;
+
+                $('div, section, article').each((_, el) => {
+                    const t = $(el).text().trim();
+                    if (t.length > maxLen && t.length < bodyText.length * 0.9) {
+                        maxLen = t.length;
+                        bestElement = $(el);
+                    }
+                });
+
+                const fallbackText = this.normalizeText(bestElement.text());
+                if (fallbackText.length > 500) {
+                    textBlocks.push({
+                        text: fallbackText.substring(0, 5000),
+                        type: 'fallback',
+                        weight: 1
+                    });
+                }
+            }
+        }
 
         // Combine everything
         const result = {

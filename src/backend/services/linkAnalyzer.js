@@ -38,14 +38,29 @@ Output Schema:
  * Analyzes links using a hybrid approach (Cheerio + GPT-4o-mini)
  * @param {string} htmlContent - Raw HTML of the page
  * @param {string} baseUrl - The base URL of the website
+ * @param {Array} preExtractedLinks - Optional links already extracted by Playwright
  * @returns {Promise<Object>} - Categorized links
  */
-async function analyzeLinks(htmlContent, baseUrl) {
+async function analyzeLinks(htmlContent, baseUrl, preExtractedLinks = null) {
     try {
         const $ = cheerio.load(htmlContent);
         const links = [];
         const seen = new Set();
         const baseHostname = new URL(baseUrl).hostname;
+
+        // Add pre-extracted links first
+        if (preExtractedLinks && Array.isArray(preExtractedLinks)) {
+            preExtractedLinks.forEach(link => {
+                try {
+                    const absoluteUrl = new URL(link.href, baseUrl).href;
+                    const urlObj = new URL(absoluteUrl);
+                    if (urlObj.hostname === baseHostname && !seen.has(absoluteUrl)) {
+                        seen.add(absoluteUrl);
+                        links.push({ text: link.text.substring(0, 50), href: absoluteUrl });
+                    }
+                } catch (e) { }
+            });
+        }
 
         $('a').each((i, el) => {
             let href = $(el).attr('href');
