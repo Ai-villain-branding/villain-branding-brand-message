@@ -33,6 +33,11 @@
     "playwright": "^1.40.1",
     "uuid": "^9.0.1"
   },
+  "optionalDependencies": {
+    "puppeteer": "^23.0.0",
+    "selenium-webdriver": "^4.15.0",
+    "chromedriver": "^131.0.0"
+  },
   "devDependencies": {
     "nodemon": "^3.0.2"
   }

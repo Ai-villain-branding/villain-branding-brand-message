@@ -1,453 +1,298 @@
 /**
- * Standalone Screenshot Service
+ * Standalone Screenshot Service (Free Methods Only)
  * 
- * Simplified Playwright-based screenshot capture service.
- * This is a 2nd attempt fallback that uses a cleaner, simpler approach
- * without extensions or persistent browser contexts.
- * 
- * Based on the standalone-screenshot.js implementation guide.
+ * CRITICAL CONSTRAINTS:
+ * - Headless mode ONLY
+ * - NO paid APIs (Scrappey, SaaS screenshot tools)
+ * - Consent-neutralization strategy (Unified with Cloudflare bypass)
+ * - Free fallback engines: Playwright → Puppeteer → Selenium
+ * - Must degrade gracefully on failures
  */
 
 const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
+const ConsentNeutralizer = require('./consentNeutralizer');
 
 class StandaloneScreenshotService {
     constructor() {
         this.defaultWidth = parseInt(process.env.SCREENSHOT_WIDTH) || 1920;
         this.defaultHeight = parseInt(process.env.SCREENSHOT_HEIGHT) || 1080;
-        this.waitTimeAfterLoad = 8000; // milliseconds
-        this.pageLoadTimeout = 90000; // milliseconds
+        this.waitTimeAfterLoad = 8000;
+        this.pageLoadTimeout = 90000;
+
+        // Cloudflare bypass settings
+        this.cloudflareExtensionEnabled = process.env.CLOUDFLARE_EXTENSION_ENABLED !== 'false';
+        this.cloudflareBypassTimeout = parseInt(process.env.CLOUDFLARE_BYPASS_TIMEOUT) || 180000; // 3 mins
+
+        // Initialize consent neutralizer
+        this.neutralizer = new ConsentNeutralizer();
     }
 
     /**
-     * Detect if the page is showing a Cloudflare challenge
-     * @param {Page} page - Playwright page object
-     * @returns {Promise<boolean>}
+     * Detect Cloudflare challenge
      */
     async detectCloudflareChallenge(page) {
         try {
-            const isCloudflare = await page.evaluate(() => {
-                const bodyText = (document.body?.innerText || document.body?.textContent || '').toLowerCase();
-                const title = (document.title || '').toLowerCase();
-                const html = document.documentElement.innerHTML.toLowerCase();
-                
-                const cloudflarePatterns = [
-                    'checking your browser',
-                    'just a moment',
-                    'please wait',
-                    'cf-browser-verification',
-                    'cf-wrapper',
-                    'cloudflare'
-                ];
-                
-                for (const pattern of cloudflarePatterns) {
-                    if (bodyText.includes(pattern) || title.includes(pattern) || html.includes(pattern)) {
-                        const cfWrapper = document.getElementById('cf-wrapper') || 
-                                       document.querySelector('.cf-wrapper') ||
-                                       document.querySelector('[class*="cf-"]') ||
-                                       document.querySelector('[id*="cf-"]');
-                        
-                        if (cfWrapper) {
-                            return true;
-                        }
-                    }
-                }
-                
-                return false;
+            return await page.evaluate(() => {
+                const title = document.title.toLowerCase();
+                const body = document.body.innerText.toLowerCase();
+                return (
+                    title.includes('just a moment') ||
+                    title.includes('attention required') ||
+                    title.includes('security check') ||
+                    title.includes('cloudflare') ||
+                    body.includes('verify you are human') ||
+                    body.includes('checking your browser')
+                );
             });
-            
-            return isCloudflare;
-        } catch (error) {
+        } catch (e) {
             return false;
         }
     }
 
     /**
-     * Detect if the page is an error/blocked page
-     * @param {Page} page - Playwright page object
-     * @returns {Promise<boolean>}
+     * Wait for Cloudflare extension to bypass challenge
      */
-    async detectErrorPage(page) {
-        try {
-            const isCloudflare = await this.detectCloudflareChallenge(page);
-            if (isCloudflare) {
+    async waitForCloudflareBypass(page, url) {
+        if (!this.cloudflareExtensionEnabled) return false;
+
+        this.log('info', `Waiting for Cloudflare bypass for ${url}...`);
+
+        const startTime = Date.now();
+        while (Date.now() - startTime < this.cloudflareBypassTimeout) {
+            // Check if extension signaled completion
+            const isComplete = await page.evaluate(() => window.cloudflareBypassComplete === true);
+
+            if (isComplete) {
+                this.log('info', 'Cloudflare bypass reported complete by extension');
                 return true;
             }
 
-            const errorIndicators = await page.evaluate(() => {
-                const bodyText = (document.body.innerText || document.body.textContent || '').toLowerCase();
-                const title = (document.title || '').toLowerCase();
-                const url = window.location.href.toLowerCase();
-                
-                const errorPatterns = [
-                    'access denied',
-                    'access forbidden',
-                    '403 forbidden',
-                    '404 not found',
-                    'page not found',
-                    'forbidden',
-                    'unauthorized',
-                    'blocked',
-                    'you don\'t have permission',
-                    'reference #',
-                    'errors.edgesuite.net',
-                    'this site can\'t be reached',
-                    'err_',
-                ];
-                
-                for (const pattern of errorPatterns) {
-                    if (title.includes(pattern) || bodyText.includes(pattern) || url.includes(pattern)) {
-                        return true;
-                    }
-                }
-                
-                const textLength = bodyText.trim().length;
-                if (textLength < 200 && (title.includes('error') || title.includes('denied') || title.includes('forbidden'))) {
+            // Check if challenge is gone
+            const isChallenge = await this.detectCloudflareChallenge(page);
+            if (!isChallenge) {
+                // Double check it's not just a blank page
+                const hasContent = await page.evaluate(() => document.body.innerText.length > 200);
+                if (hasContent) {
+                    this.log('info', 'Cloudflare challenge no longer detected');
                     return true;
                 }
-                
-                return false;
-            });
-            
-            return errorIndicators;
-        } catch (error) {
-            return false;
+            }
+
+            await page.waitForTimeout(1000);
         }
+
+        this.log('warn', 'Cloudflare bypass timed out');
+        return false;
     }
 
     /**
-     * Simple text search using Playwright's getByText
-     * @param {Page} page - Playwright page object
-     * @param {string} messageText - Text to search for
-     * @returns {Promise<ElementHandle|null>}
+     * LAYER 8: FREE-ONLY FALLBACK CAPTURE
      */
-    async findElementWithText(page, messageText) {
-        const cleanText = messageText.trim();
-        
-        // Strategy 1: Try exact text match (case-insensitive)
-        try {
-            const element = page.getByText(cleanText, { exact: false });
-            const count = await element.count();
-            if (count > 0) {
-                return await element.first().elementHandle();
-            }
-        } catch (error) {
-            // Continue to next strategy
-        }
+    async fallbackCaptureFreeOnly(url, messageText, messageId) {
+        this.log('warn', 'Attempting free fallback engines...');
 
-        // Strategy 2: Try partial match (first 50 chars)
-        if (cleanText.length > 50) {
+        // Try Puppeteer
+        if (process.env.ENABLE_PUPPETEER_FALLBACK === 'true') {
             try {
-                const partialText = cleanText.substring(0, 50).trim();
-                const element = page.getByText(partialText, { exact: false });
-                const count = await element.count();
-                if (count > 0) {
-                    return await element.first().elementHandle();
+                this.log('info', 'Trying Puppeteer fallback...');
+                const PuppeteerFallback = require('./puppeteerFallback');
+                const puppeteer = new PuppeteerFallback();
+                const result = await puppeteer.captureMessage(url, messageText, messageId);
+                if (result && result.buffer) {
+                    this.log('info', 'Puppeteer fallback succeeded');
+                    return result;
                 }
             } catch (error) {
-                // Continue
+                this.log('error', `Puppeteer fallback failed: ${error.message}`);
             }
         }
 
-        // Strategy 3: Try key phrases (words of 4+ characters)
-        const words = cleanText.split(/\s+/).filter(w => w.length >= 4);
-        if (words.length > 0) {
+        // Try Selenium
+        if (process.env.ENABLE_SELENIUM_FALLBACK === 'true') {
             try {
-                // Try first significant word
-                const element = page.getByText(words[0], { exact: false });
-                const count = await element.count();
-                if (count > 0) {
-                    return await element.first().elementHandle();
+                this.log('info', 'Trying Selenium fallback (last resort)...');
+                const SeleniumFallback = require('./seleniumFallback');
+                const selenium = new SeleniumFallback();
+                const result = await selenium.captureMessage(url, messageText, messageId);
+                if (result && result.buffer) {
+                    this.log('info', 'Selenium fallback succeeded');
+                    return result;
                 }
             } catch (error) {
-                // Continue
-            }
-
-            // Try phrase of first 2-3 words
-            if (words.length > 1) {
-                try {
-                    const phrase = words.slice(0, Math.min(3, words.length)).join(' ');
-                    const element = page.getByText(phrase, { exact: false });
-                    const count = await element.count();
-                    if (count > 0) {
-                        return await element.first().elementHandle();
-                    }
-                } catch (error) {
-                    // Continue
-                }
+                this.log('error', `Selenium fallback failed: ${error.message}`);
             }
         }
 
-        // Strategy 4: Try DOM query as fallback
-        try {
-            const element = await page.evaluateHandle(({ targetText }) => {
-                const normalizedTarget = targetText.toLowerCase().trim();
-                const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, a, li, article, section');
-                
-                for (const el of elements) {
-                    const elText = (el.innerText || el.textContent || '').trim().toLowerCase();
-                    if (elText.includes(normalizedTarget) || normalizedTarget.includes(elText)) {
-                        return el;
-                    }
-                }
-                return null;
-            }, { targetText: cleanText });
-
-            if (element && element.asElement()) {
-                return element.asElement();
-            }
-        } catch (error) {
-            // Ignore
-        }
-
-        return null;
+        // All free methods exhausted
+        throw new Error('All free capture methods failed (Playwright, Puppeteer, Selenium). Paid APIs are disabled.');
     }
 
     /**
-     * Close popups, modals, cookie banners
-     * @param {Page} page - Playwright page object
-     */
-    async closePopups(page) {
-        try {
-            // Try pressing Escape key
-            await page.keyboard.press('Escape');
-            await page.waitForTimeout(300);
-
-            // Try to find and click common close buttons
-            const closeSelectors = [
-                'button[aria-label*="close" i]',
-                'button[aria-label*="dismiss" i]',
-                'button[aria-label*="accept" i]',
-                '.modal-close',
-                '.close-modal',
-                '.popup-close',
-                '[class*="cookie"] button',
-                '[id*="cookie"] button'
-            ];
-
-            for (const selector of closeSelectors) {
-                try {
-                    const elements = await page.$$(selector);
-                    for (const element of elements) {
-                        const isVisible = await element.isVisible().catch(() => false);
-                        if (isVisible) {
-                            await element.click({ timeout: 1000 }).catch(() => {});
-                            await page.waitForTimeout(500);
-                        }
-                    }
-                } catch (e) {
-                    // Continue
-                }
-            }
-        } catch (error) {
-            // Ignore popup closing errors
-        }
-    }
-
-    /**
-     * Capture screenshot for a single message on a page
-     * @param {string} url - URL to capture
-     * @param {string} messageText - Text to search for on the page
-     * @param {string} messageId - Message ID for metadata
-     * @returns {Promise<Object|null>} Screenshot result or null on failure
+     * Main capture method with consent neutralization AND Cloudflare bypass
      */
     async captureMessage(url, messageText, messageId) {
         let browser = null;
+        let context = null;
         let page = null;
+        let userDataDir = null;
 
         try {
-            console.log(`[Standalone Screenshot] Starting capture for: ${url}`);
+            this.log('info', `Starting capture for: ${url}`);
 
-            // Launch browser (fresh instance, no persistent context)
-            browser = await chromium.launch({
-                headless: true,
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-blink-features=AutomationControlled'
-                ]
-            });
+            // PATH TO EXTENSIONS
+            const cloudflareExtPath = path.resolve(__dirname, '..', 'cloudflare-extension');
+            const stabilizerExtPath = path.resolve(__dirname, '..', 'chrome-extension');
+            const useCloudflareExt = this.cloudflareExtensionEnabled && fs.existsSync(cloudflareExtPath);
+            const useStabilizerExt = fs.existsSync(stabilizerExtPath);
 
-            // Create browser context
-            const context = await browser.newContext({
-                viewport: { width: this.defaultWidth, height: this.defaultHeight },
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            });
+            const args = [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-blink-features=AutomationControlled'
+            ];
 
-            page = await context.newPage();
+            const extensionArgs = [];
+            if (useCloudflareExt) {
+                this.log('info', 'Loading Cloudflare bypass extension');
+                extensionArgs.push(cloudflareExtPath);
+            }
+            if (useStabilizerExt) {
+                // this.log('info', 'Loading Stabilizer extension');
+                // extensionArgs.push(stabilizerExtPath); 
+                // Note: Loading multiple extensions can sometimes cause issues in persistent context
+                // prioritizing Cloudflare if both exist, or load both if stable
+                if (!useCloudflareExt) extensionArgs.push(stabilizerExtPath);
+                else extensionArgs.push(stabilizerExtPath); // Load both
+            }
 
-            console.log('[Standalone Screenshot] Navigating to page...');
+            if (extensionArgs.length > 0) {
+                const extList = extensionArgs.join(',');
+                args.push(`--disable-extensions-except=${extList}`);
+                args.push(`--load-extension=${extList}`);
+            }
 
-            // Navigate to URL
-            try {
-                await page.goto(url, {
-                    waitUntil: 'load',
-                    timeout: this.pageLoadTimeout
+            // USE PERSISTENT CONTEXT if using extensions (required)
+            if (extensionArgs.length > 0) {
+                userDataDir = `/tmp/playwright-user-data-${uuidv4()}`;
+                if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+
+                browser = await chromium.launchPersistentContext(userDataDir, {
+                    headless: true, // Extensions work in headless=new (default true in recent versions)
+                    args,
+                    viewport: { width: this.defaultWidth, height: this.defaultHeight },
+                    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    serviceWorkers: 'block' // Layer 7
                 });
-            } catch (timeoutError) {
-                console.warn(`[Standalone Screenshot] Load timeout for ${url}, trying domcontentloaded...`);
+                context = browser; // browser IS the context in persistent mode
+                page = await context.newPage();
+            } else {
+                // Standard launch (no extensions)
+                browser = await chromium.launch({ headless: true, args });
+                context = await browser.newContext({
+                    viewport: { width: this.defaultWidth, height: this.defaultHeight },
+                    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    serviceWorkers: 'block'
+                });
+                page = await context.newPage();
+            }
+
+            // LAYER 1: Inject CMP neutralizer
+            await this.neutralizer.injectCMPNeutralizer(context);
+
+            // LAYER 2: Pre-inject consent state
+            await this.neutralizer.injectConsentState(context);
+
+            // Inject service worker disabler
+            await context.addInitScript(this.neutralizer.getServiceWorkerDisableScript());
+
+            // LAYER 3: Setup safe network handling
+            await this.neutralizer.setupSafeNetworkHandling(page);
+
+            // Navigate
+            this.log('info', 'Navigating to page...');
+            try {
                 await page.goto(url, {
                     waitUntil: 'domcontentloaded',
                     timeout: this.pageLoadTimeout
                 });
+            } catch (navError) {
+                this.log('warn', `Navigation error: ${navError.message}`);
+                // Proceed to check for Cloudflare/content
             }
 
-            console.log('[Standalone Screenshot] Page loaded, waiting for content...');
+            // CLOUDFLARE BYPASS CHECK
+            if (useCloudflareExt) {
+                const isCloudflare = await this.detectCloudflareChallenge(page);
+                if (isCloudflare) {
+                    this.log('info', 'Cloudflare challenge detected! Waiting for bypass...');
+                    await this.waitForCloudflareBypass(page, url);
+                }
+            }
 
-            // Wait for page to be fully interactive
-            await page.waitForLoadState('domcontentloaded');
+            // LAYER 5: Wait for readable DOM
+            await this.neutralizer.waitForReadableDOM(page, 30000);
 
-            // Wait additional time for dynamic content
+            // LAYER 4: CSS Overlay Removal
+            await this.neutralizer.applyOverlayCSS(page);
+
+            // Wait for dynamic content
             await page.waitForTimeout(this.waitTimeAfterLoad);
 
-            // Check for Cloudflare challenge
-            const isCloudflare = await this.detectCloudflareChallenge(page);
-            if (isCloudflare) {
-                console.warn(`[Standalone Screenshot] Cloudflare challenge detected for ${url}, cannot bypass (use 1st attempt or Scrappey)`);
-                throw new Error('Cloudflare challenge detected - standalone service cannot bypass');
-            }
+            // LAYER 6: Capture
+            this.log('info', 'Capturing screenshot...');
+            const screenshotResult = await this.neutralizer.captureElementScreenshot(page);
 
-            // Check for error pages
-            const isErrorPage = await this.detectErrorPage(page);
-            if (isErrorPage) {
-                const errorDetails = await page.evaluate(() => {
-                    const bodyText = document.body.innerText || document.body.textContent || '';
-                    const title = document.title || '';
-                    return { bodyText: bodyText.substring(0, 200), title };
-                }).catch(() => ({ bodyText: '', title: '' }));
-                
-                throw new Error(`Page is blocked or inaccessible. Error: ${errorDetails.title || 'Access Denied'}`);
-            }
-
-            // Close popups
-            await this.closePopups(page);
-            await page.waitForTimeout(500);
-
-            // Find element containing the message
-            let element = await this.findElementWithText(page, messageText);
-
-            // If not found, try scrolling and searching again
-            if (!element) {
-                console.log('[Standalone Screenshot] Text not found, trying with scroll...');
-                await page.evaluate(() => {
-                    window.scrollTo(0, document.body.scrollHeight / 2);
-                });
-                await page.waitForTimeout(2000);
-                element = await this.findElementWithText(page, messageText);
-            }
-
-            // If still not found, try partial matches
-            if (!element && messageText.length > 30) {
-                console.log('[Standalone Screenshot] Trying partial matches...');
-                const partialLengths = [50, 40, 30];
-                for (const len of partialLengths) {
-                    if (messageText.length > len) {
-                        const partialText = messageText.substring(0, len).trim();
-                        element = await this.findElementWithText(page, partialText);
-                        if (element) {
-                            console.log(`[Standalone Screenshot] Found partial match (first ${len} chars)`);
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Last resort: try to find main content area
-            if (!element) {
-                console.log('[Standalone Screenshot] Text not found, using fallback: main content area');
-                try {
-                    const fallbackElement = await page.evaluateHandle(() => {
-                        const mainContent = document.querySelector('main, article, [role="main"]') || 
-                                          document.querySelector('.content, .main-content, #content, #main');
-                        return mainContent || document.body;
-                    });
-
-                    if (fallbackElement && fallbackElement.asElement()) {
-                        element = fallbackElement.asElement();
-                    }
-                } catch (e) {
-                    // Ignore fallback errors
-                }
-            }
-
-            if (!element) {
-                throw new Error(`Could not find text "${messageText}" on page`);
-            }
-
-            // Scroll element into view
-            try {
-                await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-                await page.waitForTimeout(500);
-            } catch (scrollError) {
-                // Try manual scroll
-                try {
-                    const box = await element.boundingBox().catch(() => null);
-                    if (box) {
-                        await page.evaluate(({ x, y }) => {
-                            window.scrollTo(x, y - 100);
-                        }, box);
-                        await page.waitForTimeout(500);
-                    }
-                } catch (e) {
-                    // Ignore
-                }
-            }
-
-            // Get viewport dimensions
-            const viewport = page.viewportSize();
-
-            console.log('[Standalone Screenshot] Capturing screenshot...');
-
-            // Capture screenshot (viewport only, not full page)
-            const screenshotBuffer = await page.screenshot({
-                type: 'png',
-                fullPage: false
-            });
-
-            const screenshotId = uuidv4();
-
-            const metadata = {
-                id: screenshotId,
-                messageId: messageId,
-                messageText: messageText,
-                url: url,
-                dimensions: {
-                    width: viewport.width,
-                    height: viewport.height
-                },
-                capturedAt: new Date().toISOString(),
-                source: 'standalone-playwright'
-            };
-
-            console.log(`[Standalone Screenshot] ✓ Screenshot captured successfully!`);
+            this.log('info', '✓ Screenshot captured successfully!');
+            const stats = this.neutralizer.getStats();
 
             return {
-                id: screenshotId,
-                buffer: screenshotBuffer,
-                metadata: metadata,
-                htmlEvidencePath: null // Standalone service doesn't capture HTML evidence
+                buffer: screenshotResult.buffer,
+                metadata: {
+                    url,
+                    messageId,
+                    timestamp: new Date().toISOString(),
+                    source: 'standalone-playwright',
+                    selector: screenshotResult.selector,
+                    neutralizationStats: stats
+                }
             };
 
         } catch (error) {
-            console.error(`[Standalone Screenshot] Error capturing screenshot for "${messageText}" at ${url}:`, error.message);
-            
-            // Return null on failure (allows fallback to Scrappey)
-            return null;
+            this.log('error', `Error capturing screenshot: ${error.message}`);
+
+            // LAYER 8: Try free fallback engines
+            try {
+                return await this.fallbackCaptureFreeOnly(url, messageText, messageId);
+            } catch (fallbackError) {
+                throw new Error(`Screenshot capture failed: ${error.message}. Fallback also failed: ${fallbackError.message}`);
+            }
         } finally {
             // Cleanup
             try {
-                if (page) await page.close().catch(() => {});
+                // If persistent context, close browser (which closes context)
+                if (browser) await browser.close().catch(() => { });
+
+                // Keep user data dir cleanup optional/async to avoid locks? 
+                // Better to clean it up.
+                if (userDataDir && fs.existsSync(userDataDir)) {
+                    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch (e) { }
+                }
             } catch (e) {
-                // Ignore
+                this.log('warn', `Error during cleanup: ${e.message}`);
             }
-            try {
-                if (browser) await browser.close().catch(() => {});
-            } catch (e) {
-                // Ignore
-            }
+            this.neutralizer.resetStats();
         }
+    }
+
+    log(level, message) {
+        console.log(`[Standalone Screenshot] ${message}`);
     }
 }
 
 module.exports = StandaloneScreenshotService;
-
