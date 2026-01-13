@@ -639,6 +639,170 @@ app.post('/api/screenshot', async (req, res) => {
     }
 });
 
+// 4b. Batch Screenshot Generation with Live Status
+// Creates pending records immediately and processes in background
+app.post('/api/screenshots/batch', async (req, res) => {
+    const { tasks } = req.body; // tasks = [{ companyId, messageId, url, text }, ...]
+
+    if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+        return res.status(400).json({ error: 'Tasks array is required' });
+    }
+
+    // Generate unique batch ID for grouping
+    const batchId = require('crypto').randomUUID();
+    const batchTimestamp = new Date().toISOString();
+
+    console.log(`[Batch Screenshot] Starting batch ${batchId} with ${tasks.length} screenshots`);
+
+    try {
+        // 1. Create pending records immediately with batch_id
+        const pendingRecords = [];
+        for (const task of tasks) {
+            const pendingData = {
+                company_id: task.companyId,
+                message_id: task.messageId,
+                page_url: task.url,
+                status: 'pending',
+                attempt_count: 0,
+                batch_id: batchId,
+                created_at: batchTimestamp
+            };
+
+            const { data, error } = await supabase
+                .from('screenshots')
+                .insert(pendingData)
+                .select()
+                .single();
+
+            if (error) {
+                console.error(`[Batch Screenshot] Failed to create pending record:`, error);
+                continue;
+            }
+
+            pendingRecords.push({
+                id: data.id,
+                companyId: task.companyId,
+                messageId: task.messageId,
+                url: task.url,
+                text: task.text
+            });
+        }
+
+        console.log(`[Batch Screenshot] Created ${pendingRecords.length} pending records for batch ${batchId}`);
+
+        // 2. Return pending record IDs and batchId immediately (non-blocking response)
+        res.json({
+            success: true,
+            batchId: batchId,
+            pending: pendingRecords.map(r => ({
+                id: r.id,
+                messageId: r.messageId,
+                url: r.url
+            }))
+        });
+
+        // 3. Process screenshots in background (parallel with controlled concurrency)
+        const CONCURRENCY = 3; // Process 3 at a time
+        const chunks = [];
+        for (let i = 0; i < pendingRecords.length; i += CONCURRENCY) {
+            chunks.push(pendingRecords.slice(i, i + CONCURRENCY));
+        }
+
+        for (const chunk of chunks) {
+            await Promise.allSettled(chunk.map(async (record) => {
+                try {
+                    // Update status to processing
+                    await supabase
+                        .from('screenshots')
+                        .update({ status: 'processing', attempt_count: 1 })
+                        .eq('id', record.id);
+
+                    console.log(`[Batch Screenshot] Processing ${record.id}: ${record.url}`);
+
+                    // Capture screenshot
+                    const result = await screenshotService.captureMessage(record.url, record.text, record.messageId);
+
+                    if (result && result.imageBuffer) {
+                        // Upload to Supabase storage
+                        const filename = `${record.id}.png`;
+                        const { data: uploadData, error: uploadError } = await supabase.storage
+                            .from('screenshots')
+                            .upload(filename, result.imageBuffer, {
+                                contentType: 'image/png',
+                                upsert: true
+                            });
+
+                        if (uploadError) throw uploadError;
+
+                        const { data: urlData } = supabase.storage
+                            .from('screenshots')
+                            .getPublicUrl(filename);
+
+                        // Update record with success
+                        await supabase
+                            .from('screenshots')
+                            .update({
+                                status: 'success',
+                                image_url: urlData.publicUrl,
+                                captured_at: new Date().toISOString()
+                            })
+                            .eq('id', record.id);
+
+                        console.log(`[Batch Screenshot] Success: ${record.id}`);
+                    } else {
+                        throw new Error('No image data returned');
+                    }
+                } catch (error) {
+                    console.error(`[Batch Screenshot] Failed ${record.id}:`, error.message);
+
+                    // Update record with failure
+                    await supabase
+                        .from('screenshots')
+                        .update({
+                            status: 'failed',
+                            error_message: error.message?.substring(0, 500) || 'Unknown error'
+                        })
+                        .eq('id', record.id);
+                }
+            }));
+
+            // Small delay between chunks
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        console.log(`[Batch Screenshot] Batch processing complete`);
+
+    } catch (error) {
+        console.error('[Batch Screenshot] Batch failed:', error);
+        // Response already sent, so we just log
+    }
+});
+
+// 4c. Get Screenshot Status (for polling)
+app.get('/api/screenshots/status', async (req, res) => {
+    const { ids } = req.query; // Comma-separated IDs
+
+    if (!ids) {
+        return res.status(400).json({ error: 'IDs parameter is required' });
+    }
+
+    const idArray = ids.split(',').filter(id => id.trim());
+
+    try {
+        const { data, error } = await supabase
+            .from('screenshots')
+            .select('id, status, image_url, error_message, attempt_count, page_url, message_id')
+            .in('id', idArray);
+
+        if (error) throw error;
+
+        res.json({ screenshots: data });
+    } catch (error) {
+        console.error('[Screenshot Status] Error:', error);
+        res.status(500).json({ error: 'Failed to fetch screenshot status' });
+    }
+});
+
 // 4a. Receive HTML Evidence from CloudFlare Bypass Extension
 app.post('/api/evidence/html', async (req, res) => {
     const { url, html, timestamp, tabId } = req.body;

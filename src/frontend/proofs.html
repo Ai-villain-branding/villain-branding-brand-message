@@ -117,6 +117,62 @@
             border-bottom: 1px solid var(--border);
         }
 
+        .batch-group {
+            margin-bottom: 2rem;
+        }
+
+        .batch-label {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin-bottom: 1rem;
+            padding-left: 0.5rem;
+            border-left: 2px solid var(--accent);
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 0.5rem;
+            left: 0.5rem;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            border-radius: 4px;
+            z-index: 5;
+        }
+
+        .status-pending {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+        }
+
+        .status-processing {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .status-success {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .status-failed {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
         .date-proofs {
             width: 100%;
             display: grid;
@@ -616,6 +672,13 @@
 
                 // Render all pages from messages with re-capture option
                 renderAllPages(messages, existingEvidences, currentCompany);
+
+                // Check if we should start polling (came from generate button)
+                const urlParams = new URLSearchParams(window.location.search);
+                const batchId = urlParams.get('batchId');
+                if (batchId || sessionStorage.getItem('pendingScreenshots')) {
+                    startPolling(batchId);
+                }
             } catch (error) {
                 console.error('Error loading proofs:', error);
                 document.getElementById('proofsGrid').innerHTML = `<p class="text-center text-error">Failed to load proofs.</p>`;
@@ -654,6 +717,44 @@
                 .sort((a, b) => b[0].localeCompare(a[0])); // Sort dates descending
         }
 
+        // Helper function to group screenshots within a date by batch_id
+        function groupByBatch(screenshots) {
+            const batchGroups = new Map();
+
+            screenshots.forEach(proof => {
+                // Use batch_id if available, otherwise use created_at timestamp (rounded to minute)
+                const batchKey = proof.batch_id || getTimeKey(proof.created_at);
+                if (!batchGroups.has(batchKey)) {
+                    batchGroups.set(batchKey, {
+                        proofs: [],
+                        timestamp: proof.created_at,
+                        batchId: proof.batch_id
+                    });
+                }
+                batchGroups.get(batchKey).proofs.push(proof);
+            });
+
+            // Sort batches descending (newest first) by timestamp
+            return Array.from(batchGroups.entries()).sort((a, b) => {
+                return new Date(b[1].timestamp) - new Date(a[1].timestamp);
+            });
+        }
+
+        // Helper to get time key (for legacy screenshots without batch_id)
+        function getTimeKey(dateString) {
+            if (!dateString) return 'unknown';
+            const date = new Date(dateString);
+            const mins = Math.floor(date.getMinutes() / 5) * 5;
+            return `${date.toISOString().split('T')[0]}-${date.getHours()}-${mins}`;
+        }
+
+        // Helper to format time for batch header
+        function formatBatchTime(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+
 
         // Helper function to render a single proof card
         function renderProofCard(proof, messagesMap, company) {
@@ -661,27 +762,39 @@
             const messageContent = message?.content || proof.message_content || 'Unknown message';
             const cardId = `proof-${proof.id}`;
             const isFailed = !proof.image_url || proof.status === 'failed';
+            const isPending = proof.status === 'pending' || proof.status === 'processing';
 
             // Format URL for display
             let foundOnDisplay = 'Unknown page';
             let foundOnHref = '#';
             try {
-                if (proof.original_url) {
-                    const url = new URL(proof.original_url);
+                if (proof.original_url || proof.page_url) {
+                    const urlStr = proof.original_url || proof.page_url;
+                    const url = new URL(urlStr);
                     foundOnDisplay = url.pathname === '/' ? 'Homepage' : url.pathname;
-                    foundOnHref = proof.original_url;
+                    foundOnHref = urlStr;
                 }
             } catch (e) {
-                console.warn('Invalid URL in proof:', proof.original_url);
+                console.warn('Invalid URL in proof:', proof.original_url || proof.page_url);
             }
 
+            // Status indicator for pending/processing
+            const statusIndicator = isPending ?
+                `<div class="status-indicator status-${proof.status}">${proof.status.toUpperCase()}</div>` : '';
+
             return `
-        <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}">
+        <div class="proof-card" id="${cardId}" data-proof-id="${proof.id}" data-screenshot-id="${proof.id}">
+          ${statusIndicator}
           <button class="delete-btn" onclick="deleteProof('${proof.id}', '${cardId}', event)" title="Delete screenshot">×</button>
-          ${!isFailed ? `<button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>` : ''}
+          ${!isFailed && !isPending ? `<button class="edit-btn" onclick="editProof('${proof.id}', '${proof.image_url}', event)" title="Crop/Edit image">✎</button>` : ''}
           
           <div class="proof-image-container">
-            ${isFailed ? `
+            ${isPending ? `
+              <div class="screenshot-loader">
+                <div class="spinner"></div>
+                <div class="loader-text">${proof.status === 'processing' ? 'Capturing...' : 'Pending...'}</div>
+              </div>
+            ` : isFailed ? `
               <div class="proof-placeholder">
                 <div style="text-align: center;">
                   <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
@@ -701,9 +814,9 @@
             </div>
             <div style="margin-top: 1.5rem;">
               <button class="btn btn-secondary re-capture-btn" 
-                data-is-failed="${isFailed}"
-                onclick="handleReCaptureOrDownload('${proof.message_id}', '${proof.original_url}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', '${proof.image_url}', ${isFailed}, event)">
-                ${isFailed ? 'RE-GENERATE' : 'RE-CAPTURE'}
+                data-is-failed="${isFailed || isPending}"
+                onclick="handleReCaptureOrDownload('${proof.message_id}', '${proof.original_url || proof.page_url}', '${messageContent.replace(/'/g, "\\'")}', '${proof.id}', '${proof.image_url}', ${isFailed || isPending}, event)">
+                ${isFailed ? 'RE-GENERATE' : isPending ? 'PENDING...' : 'RE-CAPTURE'}
               </button>
             </div>
           </div>
@@ -716,7 +829,7 @@
 
             // Only show screenshots that have been generated (existingEvidences)
             if (!existingEvidences || existingEvidences.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                container.innerHTML = `< p class="text-center text-muted" > No screenshots generated yet.Go to Messages to generate screenshots.</p > `;
                 return;
             }
 
@@ -733,24 +846,105 @@
 
             // Render date groups
             if (dateGroups.length === 0) {
-                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                container.innerHTML = `< p class="text-center text-muted" > No screenshots generated yet.Go to Messages to generate screenshots.</p > `;
                 return;
             }
 
-            // If only one date group, we can optionally hide the date label, but let's show it for consistency
+            // Render with batch sub-grouping
             container.innerHTML = dateGroups.map(([dateKey, proofs]) => {
                 const formattedDate = formatDate(proofs[0].created_at);
-                const proofCards = proofs.map(proof => renderProofCard(proof, messagesMap, company)).join('');
+
+                // Group proofs by batch within this date
+                const batches = groupByBatch(proofs);
+
+                const batchesHtml = batches.map(([batchKey, batchData], batchIndex) => {
+                    const batchTime = formatBatchTime(batchData.timestamp);
+                    const batchLabel = batchTime ? ` - ${batchTime} ` : '';
+                    const proofCards = batchData.proofs.map(proof => renderProofCard(proof, messagesMap, company)).join('');
+
+                    return `
+                < div class="batch-group" data - batch - id="${batchData.batchId || batchKey}" >
+                    ${batches.length > 1 ? `<div class="batch-label">Batch ${batches.length - batchIndex}${batchLabel}</div>` : ''}
+            <div class="date-proofs">
+                ${proofCards}
+            </div>
+                        </div >
+                `;
+                }).join('');
 
                 return `
-                    <div class="date-group">
-                        <div class="date-label">${formattedDate}</div>
-                        <div class="date-proofs">
-                            ${proofCards}
-                        </div>
-                    </div>
+                < div class="date-group" >
+                    <div class="date-label">${formattedDate}</div>
+                        ${batchesHtml}
+                    </div >
                 `;
             }).join('');
+        }
+
+        // Status polling for pending screenshots
+        let pollingInterval = null;
+        let pendingIds = [];
+
+        async function startPolling(batchId) {
+            const pendingData = sessionStorage.getItem('pendingScreenshots');
+            if (!pendingData && !batchId) return;
+
+            if (pendingData) {
+                const pending = JSON.parse(pendingData);
+                pendingIds = pending.map(p => p.id);
+            }
+
+            console.log(`[Polling] Starting status polling for ${pendingIds.length} screenshots`);
+
+            pollingInterval = setInterval(async () => {
+                try {
+                    const idsParam = pendingIds.join(',');
+                    const response = await fetch(`/ api / screenshots / status ? ids = ${idsParam} `);
+                    const data = await response.json();
+
+                    if (!data.screenshots) return;
+
+                    let allComplete = true;
+                    data.screenshots.forEach(screenshot => {
+                        const card = document.querySelector(`[data - screenshot - id= "${screenshot.id}"]`);
+                        if (!card) return;
+
+                        // Update status indicator
+                        const statusEl = card.querySelector('.status-indicator');
+                        if (statusEl) {
+                            statusEl.className = `status - indicator status - ${screenshot.status} `;
+                            statusEl.textContent = screenshot.status.toUpperCase();
+                        }
+
+                        // If completed, update the image
+                        if (screenshot.status === 'success' && screenshot.image_url) {
+                            const imgContainer = card.querySelector('.proof-image-container');
+                            if (imgContainer) {
+                                imgContainer.innerHTML = `< img src = "${screenshot.image_url}" class="proof-image" onclick = "openLightbox('${screenshot.image_url}')" > `;
+                            }
+                            // Remove from pending
+                            pendingIds = pendingIds.filter(id => id !== screenshot.id);
+                        } else if (screenshot.status === 'failed') {
+                            const imgContainer = card.querySelector('.proof-image-container');
+                            if (imgContainer) {
+                                imgContainer.innerHTML = `< div class="proof-placeholder" > <div>Failed to capture<br><small>${screenshot.error_message || 'Unknown error'}</small></div></div > `;
+                            }
+                            pendingIds = pendingIds.filter(id => id !== screenshot.id);
+                        } else {
+                            allComplete = false;
+                        }
+                    });
+
+                    if (allComplete || pendingIds.length === 0) {
+                        console.log('[Polling] All screenshots complete, stopping poll');
+                        clearInterval(pollingInterval);
+                        sessionStorage.removeItem('pendingScreenshots');
+                        sessionStorage.removeItem('currentBatchId');
+                    }
+                } catch (error) {
+                    console.error('[Polling] Error:', error);
+                }
+            }, 2000); // Poll every 2 seconds
         }
 
         async function reCaptureScreenshot(messageId, url, text, screenshotId, event) {
@@ -779,9 +973,9 @@
                 placeholder.className = 'screenshot-loader';
                 placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center;';
                 placeholder.innerHTML = `
-                    <div class="spinner"></div>
+                < div class="spinner" ></div >
                     <div class="loader-text">Capturing screenshot...</div>
-                `;
+            `;
             }
 
             try {
@@ -798,12 +992,12 @@
                         placeholder.className = 'proof-placeholder';
                         placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);';
                         placeholder.innerHTML = `
-                            <div style="text-align: center;">
+                < div style = "text-align: center;" >
                                 <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
                                 <div style="margin-bottom: 0.5rem;">📷</div>
                                 <div>Click RE-GENERATE to try again</div>
-                            </div>
-                        `;
+                            </div >
+                `;
                     }
                     return;
                 }
@@ -838,12 +1032,12 @@
                 const placeholder = card.querySelector('.proof-placeholder, .screenshot-loader');
                 if (placeholder && placeholder.classList.contains('screenshot-loader')) {
                     placeholder.innerHTML = `
-                        <div style="text-align: center;">
+                < div style = "text-align: center;" >
                             <div style="color: #dc2626; margin-bottom: 0.5rem; font-size: 1.1rem;">⚠️ Failed to Capture</div>
                             <div style="margin-bottom: 0.5rem;">📷</div>
                             <div>Click RE-GENERATE to try again</div>
-                        </div>
-                    `;
+                        </div >
+                `;
                     placeholder.className = 'proof-placeholder';
                     placeholder.style.cssText = 'width: 100%; height: 300px; background: var(--bg-primary); border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted);';
                 }
@@ -863,7 +1057,7 @@
 
             try {
                 // Find the card first
-                const card = cardId ? document.getElementById(cardId) : document.querySelector(`[data-proof-id="${screenshotId}"]`);
+                const card = cardId ? document.getElementById(cardId) : document.querySelector(`[data - proof - id="${screenshotId}"]`);
 
                 // Delete from database
                 await window.api.deleteScreenshot(screenshotId);
@@ -895,7 +1089,7 @@
                                     const remainingGroups = container.querySelectorAll('.date-group');
 
                                     if (remainingGroups.length === 0) {
-                                        container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                                        container.innerHTML = `< p class="text-center text-muted" > No screenshots generated yet.Go to Messages to generate screenshots.</p > `;
                                     }
                                 }, 300);
                             }
@@ -905,7 +1099,7 @@
                             const remainingCards = container.querySelectorAll('.proof-card');
 
                             if (remainingCards.length === 0) {
-                                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
+                                container.innerHTML = `< p class="text-center text-muted" > No screenshots generated yet.Go to Messages to generate screenshots.</p > `;
                             }
                         }
                     }, 300);
@@ -1139,7 +1333,7 @@
             // Create a temporary anchor element to trigger download
             const link = document.createElement('a');
             link.href = imageUrl;
-            link.download = `evidence-${screenshotId || Date.now()}.png`;
+            link.download = `evidence - ${screenshotId || Date.now()}.png`;
 
             // Set crossOrigin to handle CORS if needed
             const img = new Image();

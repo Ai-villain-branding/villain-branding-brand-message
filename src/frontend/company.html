@@ -918,7 +918,7 @@
             const originalButtonHTML = btn.innerHTML;
 
             btn.disabled = true;
-            btn.innerHTML = 'GENERATING...';
+            btn.innerHTML = 'STARTING...';
 
             try {
                 // Build array of screenshot tasks
@@ -934,15 +934,11 @@
                     console.log(`Processing message ${msgId}: "${msg.content}"`);
 
                     // Get URLs to screenshot for this message
-                    // Logic matches updateButton(): if explicit URL selections exist, use those;
-                    // otherwise, if message is selected, use all URLs from locations
                     let urlsToScreenshot = [];
                     if (selectedUrls[msgId] && selectedUrls[msgId].size > 0) {
-                        // User explicitly selected some URLs, use those
                         urlsToScreenshot = Array.from(selectedUrls[msgId]);
                         console.log(`Using ${urlsToScreenshot.length} selected URLs for message ${msgId}`);
                     } else if (msg.locations && msg.locations.length > 0) {
-                        // Message is selected but no explicit URL selections, use all locations
                         urlsToScreenshot = msg.locations;
                         console.log(`Using all ${urlsToScreenshot.length} locations for message ${msgId}`);
                     }
@@ -971,73 +967,33 @@
                     return;
                 }
 
-                console.log(`Generating ${screenshotTasks.length} screenshots in batches...`);
+                console.log(`Submitting ${screenshotTasks.length} screenshots to batch endpoint...`);
 
-                // Process screenshots in batches with controlled concurrency
-                const results = await window.api.processInBatches(
-                    screenshotTasks,
-                    async (task, index) => {
-                        console.log(`[${index + 1}/${screenshotTasks.length}] Generating screenshot for URL: ${task.url}`);
-                        try {
-                            const result = await window.api.generateScreenshot(
-                                task.companyId,
-                                task.messageId,
-                                task.url,
-                                task.text
-                            );
+                // Call batch endpoint - this returns immediately with pending IDs
+                const response = await fetch('/api/screenshots/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tasks: screenshotTasks })
+                });
 
-                            // Add small delay after successful screenshot to allow browser context to recover
-                            if (result && result.success) {
-                                await new Promise(resolve => setTimeout(resolve, 100));
-                            }
+                const result = await response.json();
 
-                            console.log(`[${index + 1}/${screenshotTasks.length}] Screenshot result for ${task.url}:`, result);
-                            // API returns success: false for failed attempts
-                            // This allows us to track failed attempts
-                            return result;
-                        } catch (err) {
-                            console.error(`[${index + 1}/${screenshotTasks.length}] Failed to generate screenshot for ${task.url}:`, err);
-                            // Return error object so we can count it
-                            return { success: false, error: err.message || String(err) };
-                        }
-                    },
-                    {
-                        batchSize: 2, // Process 2 screenshots concurrently (reduced for better reliability)
-                        delayBetweenBatches: 1500, // 1.5s delay between batches (increased for browser context recovery)
-                        delayWithinBatch: 200, // 200ms delay between items within a batch (staggered starts)
-                        maxRetries: 2, // Retry failed screenshots up to 2 times
-                        retryDelay: 1000, // Initial retry delay (exponential backoff: 1s, 2s)
-                        shouldRetry: (result) => {
-                            // Retry if screenshot failed or returned error
-                            return result && !result.success;
-                        },
-                        onProgress: (current, total, task) => {
-                            // Update button with progress
-                            const percentage = Math.round((current / total) * 100);
-                            btn.innerHTML = `GENERATING... ${current}/${total} (${percentage}%)`;
-                            console.log(`Progress: ${current}/${total} screenshots completed (${percentage}%)`);
-                        }
-                    }
-                );
-
-                const successCount = results.filter(r => r && r.success === true).length;
-                const totalCount = results.length;
-
-                console.log(`Screenshot generation complete: ${successCount}/${totalCount} successful`);
-
-                if (successCount === 0 && totalCount > 0) {
-                    alert(`All ${totalCount} screenshot generation attempts failed. Failed attempts are saved and can be re-generated from the Evidences page.`);
-                } else if (successCount < totalCount) {
-                    alert(`Generated ${successCount} out of ${totalCount} screenshots. Failed attempts are saved and can be re-generated from the Evidences page.`);
-                } else if (successCount > 0) {
-                    alert(`Successfully generated ${successCount} screenshot(s)!`);
+                if (!result.success) {
+                    throw new Error(result.error || 'Batch request failed');
                 }
 
-                // Navigate to proofs page
-                window.location.href = `proofs.html?id=${companyId}`;
+                console.log(`Batch submitted successfully. ${result.pending.length} screenshots pending.`);
+
+                // Store pending IDs in sessionStorage for the proofs page to poll
+                sessionStorage.setItem('pendingScreenshots', JSON.stringify(result.pending));
+                sessionStorage.setItem('currentBatchId', result.batchId);
+
+                // Redirect immediately to proofs page with batchId
+                window.location.href = `proofs.html?id=${companyId}&batchId=${result.batchId}`;
+
             } catch (error) {
-                console.error('Error generating proofs:', error);
-                alert('Failed to generate proofs. Check console for details.');
+                console.error('Error submitting batch:', error);
+                alert('Failed to start screenshot generation. Check console for details.');
                 btn.disabled = false;
                 btn.innerHTML = originalButtonHTML;
                 updateButton();
