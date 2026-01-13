@@ -1,0 +1,24 @@
+{
+    "ignore": [
+        ".git",
+        "node_modules",
+        "public",
+        "test",
+        "tests",
+        "*.test.js",
+        "*.spec.js",
+        "debug_*.js",
+        "temp",
+        "tmp",
+        "logs",
+        "*.log",
+        ".DS_Store"
+    ],
+    "watch": [
+        "server.js",
+        "services",
+        "config.js",
+        ".env"
+    ],
+    "ext": "js,json,env"
+}

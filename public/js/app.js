@@ -11,7 +11,7 @@ async function apiRequest(endpoint, options = {}) {
     });
 
     const data = await response.json().catch(() => ({ error: 'Request failed' }));
-    
+
     // For screenshot generation, we want to return the response even if it's a 404
     // because failed attempts are now tracked in the database
     if (!response.ok && endpoint.includes('/api/screenshot') && response.status === 404) {
@@ -39,6 +39,78 @@ window.api = {
         method: 'POST',
         body: JSON.stringify({ url: baseUrl, pages: pages, mode: 'specific' })
     }),
+
+    // 1c. Start Analysis with Streaming (Fetch + ReadableStream)
+    analyzeStream: async (url, pages, mode, onProgress, onComplete, onError) => {
+        const params = new URLSearchParams();
+        if (url) params.append('url', url);
+        if (mode) params.append('mode', mode);
+        if (pages && pages.length > 0) params.append('pages', JSON.stringify(pages));
+
+        try {
+            const response = await fetch(`/api/analyze-stream?${params.toString()}`);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMsg = `Server error: ${response.status}`;
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    errorMsg = errorJson.message || errorJson.error || errorMsg;
+                } catch (e) {
+                    // Use raw text if not JSON
+                    if (errorText.length < 200) errorMsg = errorText;
+                }
+                throw new Error(errorMsg);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                // Process complete blocks (double newline separated)
+                const blocks = buffer.split('\n\n');
+                buffer = blocks.pop(); // Keep the last partial block
+
+                for (const block of blocks) {
+                    const lines = block.split('\n');
+                    let eventType = 'message';
+                    let data = null;
+
+                    for (const line of lines) {
+                        if (line.startsWith('event: ')) {
+                            eventType = line.substring(7).trim();
+                        } else if (line.startsWith('data: ')) {
+                            try {
+                                data = JSON.parse(line.substring(6));
+                            } catch (e) {
+                                console.warn('Failed to parse SSE data:', line);
+                            }
+                        }
+                    }
+
+                    if (data) {
+                        if (eventType === 'log' || eventType === 'progress') {
+                            if (onProgress) onProgress({ type: eventType, ...data });
+                        } else if (eventType === 'complete') {
+                            if (onComplete) onComplete(data);
+                            return; // Stop processing
+                        } else if (eventType === 'error') {
+                            throw new Error(data.message || 'Unknown error');
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Stream error:', error);
+            if (onError) onError({ message: error.message });
+        }
+    },
 
     // 2. Get Companies
     getCompanies: () => apiRequest('/api/companies'),
@@ -95,7 +167,7 @@ window.api = {
             const allNavLinks = document.querySelectorAll('a.nav-link');
             navMessages = Array.from(allNavLinks).find(a => a.textContent.trim() === 'MESSAGES');
         }
-        
+
         // Find EVIDENCES link - try by ID first, then by text content
         let navEvidences = document.getElementById('navEvidences');
         if (!navEvidences) {
@@ -105,7 +177,7 @@ window.api = {
 
         // MESSAGES always points to companies list page
         if (navMessages) navMessages.href = `companies.html`;
-        
+
         // EVIDENCES always points to main proofs page (companies-proofs.html)
         if (navEvidences) navEvidences.href = `companies-proofs.html`;
     },
@@ -120,7 +192,7 @@ window.api = {
             const overlay = document.createElement('div');
             overlay.id = 'custom-dialog-overlay';
             overlay.className = 'custom-dialog-overlay';
-            
+
             overlay.innerHTML = `
                 <div class="custom-dialog">
                     <div class="custom-dialog-title">${title}</div>
@@ -133,10 +205,10 @@ window.api = {
 
             window.customDialogResolve = resolve;
             document.body.appendChild(overlay);
-            
+
             // Trigger animation
             setTimeout(() => overlay.classList.add('active'), 10);
-            
+
             // Close on Escape key
             const escapeHandler = (e) => {
                 if (e.key === 'Escape') {
@@ -160,7 +232,7 @@ window.api = {
             const overlay = document.createElement('div');
             overlay.id = 'custom-dialog-overlay';
             overlay.className = 'custom-dialog-overlay';
-            
+
             overlay.innerHTML = `
                 <div class="custom-dialog">
                     <div class="custom-dialog-title">${title}</div>
@@ -174,10 +246,10 @@ window.api = {
 
             window.customDialogResolve = resolve;
             document.body.appendChild(overlay);
-            
+
             // Trigger animation
             setTimeout(() => overlay.classList.add('active'), 10);
-            
+
             // Close on Escape key (cancels)
             const escapeHandler = (e) => {
                 if (e.key === 'Escape') {

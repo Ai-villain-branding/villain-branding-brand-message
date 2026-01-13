@@ -155,7 +155,7 @@ async function captureScreenshot(options) {
             const status = error.response.status;
             const statusText = error.response.statusText;
             const errorData = error.response.data;
-            
+
             // Try to extract meaningful error message
             let errorMessage = 'Unknown error';
             if (typeof errorData === 'string') {
@@ -169,7 +169,7 @@ async function captureScreenshot(options) {
             } else if (statusText) {
                 errorMessage = statusText;
             }
-            
+
             // Log full error details for debugging
             console.error(`[Scrappey] API error for URL ${url}:`, {
                 status,
@@ -179,7 +179,7 @@ async function captureScreenshot(options) {
                 requestUrl: apiUrl.replace(config.scrappeyApiKey, 'KEY_REDACTED'),
                 requestBody: JSON.stringify(requestBody)
             });
-            
+
             // Provide more helpful error messages for common issues
             if (status === 500) {
                 console.error(`[Scrappey] 500 Internal Server Error - This could indicate:`);
@@ -188,7 +188,7 @@ async function captureScreenshot(options) {
                 console.error(`  - URL is too heavily protected (e.g., ${url})`);
                 console.error(`  - Request format issue`);
             }
-            
+
             throw new Error(`Scrappey API error (${status}) for URL ${url}: ${errorMessage}`);
         } else if (error.request) {
             // Request was made but no response received
@@ -207,6 +207,61 @@ async function captureScreenshot(options) {
 }
 
 module.exports = {
-    captureScreenshot
+    captureScreenshot,
+    fetchContent
 };
+
+/**
+ * Fetches the HTML content of a URL using Scrappey Anti-Bot API.
+ * 
+ * @param {string} url - The target URL to fetch
+ * @returns {Promise<string>} The HTML content
+ */
+async function fetchContent(url) {
+    // Validate API key
+    if (!config.scrappeyApiKey) {
+        throw new Error('SCRAPPEY_API_KEY environment variable is required.');
+    }
+
+    // Validate URL
+    if (!url || typeof url !== 'string') {
+        throw new Error('URL is required and must be a string');
+    }
+
+    const requestBody = {
+        cmd: 'request.get',
+        url: url,
+        screenshot: false
+    };
+
+    const apiUrl = `https://publisher.scrappey.com/api/v1?key=${config.scrappeyApiKey}`;
+
+    try {
+        console.log(`[Scrappey] Fetching content for ${url}`);
+        const response = await axios.post(apiUrl, requestBody, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 60000 // 60 second timeout
+        });
+
+        if (response.status !== 200) {
+            throw new Error(`Scrappey API returned status ${response.status}`);
+        }
+
+        const data = response.data;
+        if (data.error || data.status === 'error') {
+            throw new Error(`Scrappey API error: ${data.message || data.error}`);
+        }
+
+        if (!data.solution) {
+            throw new Error('Scrappey API response missing solution');
+        }
+
+        // Scrappey returns the HTML body in 'response' or 'body'
+        return data.solution.response || data.solution.body || '';
+
+    } catch (error) {
+        console.error(`[Scrappey] Error fetching content for ${url}:`, error.message);
+        throw error;
+    }
+}
 

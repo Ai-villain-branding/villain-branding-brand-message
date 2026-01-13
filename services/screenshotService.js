@@ -30,7 +30,7 @@ class ScreenshotService {
 
             // Get absolute path to chrome extension directory
             const extensionPath = path.resolve(__dirname, '..', 'chrome-extension');
-            
+
             // Verify extension directory exists
             if (!fs.existsSync(extensionPath)) {
                 console.warn(`Chrome extension directory not found at ${extensionPath}, will use direct script injection instead`);
@@ -79,7 +79,7 @@ class ScreenshotService {
                 const bodyText = (document.body.innerText || document.body.textContent || '').toLowerCase();
                 const title = (document.title || '').toLowerCase();
                 const url = window.location.href.toLowerCase();
-                
+
                 // Common error page indicators
                 const errorPatterns = [
                     'access denied',
@@ -99,23 +99,23 @@ class ScreenshotService {
                     'cf-ray',
                     'checking your browser',
                 ];
-                
+
                 // Check title, body text, and URL for error indicators
                 for (const pattern of errorPatterns) {
                     if (title.includes(pattern) || bodyText.includes(pattern) || url.includes(pattern)) {
                         return true;
                     }
                 }
-                
+
                 // Check for very short content (error pages are often minimal)
                 const textLength = bodyText.trim().length;
                 if (textLength < 200 && (title.includes('error') || title.includes('denied') || title.includes('forbidden'))) {
                     return true;
                 }
-                
+
                 return false;
             });
-            
+
             return errorIndicators;
         } catch (error) {
             // If detection fails, assume it's not an error page (better to try than to skip)
@@ -139,7 +139,7 @@ class ScreenshotService {
             // Scroll down in increments to reveal content
             const scrollIncrement = dimensions.clientHeight * 0.8; // Scroll 80% of viewport height
             const maxScrolls = Math.ceil(dimensions.scrollHeight / scrollIncrement);
-            
+
             for (let i = 0; i < Math.min(maxScrolls, 5); i++) { // Limit to 5 scrolls
                 await page.evaluate((scrollY) => {
                     window.scrollTo(0, scrollY);
@@ -158,8 +158,20 @@ class ScreenshotService {
     // Close popups, modals, cookie banners, etc.
     async closePopups(page) {
         try {
+            // Priority 1: OneTrust / CookiePro (Most common and problematic)
+            const oneTrustBtn = await page.$('#onetrust-accept-btn-handler');
+            if (oneTrustBtn && await oneTrustBtn.isVisible()) {
+                console.log('Found OneTrust accept button, clicking...');
+                await oneTrustBtn.click();
+                await page.waitForTimeout(1000); // Wait for animation
+            }
+
             // Common selectors for popups, modals, and cookie banners
             const popupSelectors = [
+                // Other OneTrust variants
+                '#onetrust-banner-sdk .save-preference-btn-handler',
+                '#onetrust-close-btn-container button',
+
                 // Cookie consent banners
                 '[id*="cookie"]',
                 '[class*="cookie"]',
@@ -187,7 +199,12 @@ class ScreenshotService {
                 'button:has-text("Accept")',
                 'button:has-text("Accept All")',
                 'button:has-text("Accept All Cookies")',
+                'button:has-text("Allow")',
+                'button:has-text("Allow All")',
+                'button:has-text("Allow Cookies")',
                 'button:has-text("I Accept")',
+                'button:has-text("I Agree")',
+                'button:has-text("Agree")',
                 'button:has-text("Got it")',
                 'button:has-text("OK")',
                 'button:has-text("Close")',
@@ -211,17 +228,19 @@ class ScreenshotService {
                         if (isVisible) {
                             const text = await element.textContent().catch(() => '');
                             const lowerText = text.toLowerCase();
-                            
+
                             // Check if it's a close/accept button
-                            if (lowerText.includes('accept') || 
-                                lowerText.includes('close') || 
+                            if (lowerText.includes('accept') ||
+                                lowerText.includes('allow') ||
+                                lowerText.includes('agree') ||
+                                lowerText.includes('close') ||
                                 lowerText.includes('dismiss') ||
                                 lowerText.includes('got it') ||
                                 lowerText.includes('ok') ||
                                 lowerText === '×' ||
                                 lowerText === '✕' ||
                                 lowerText === 'x') {
-                                await element.click({ timeout: 1000 }).catch(() => {});
+                                await element.click({ timeout: 1000 }).catch(() => { });
                                 await page.waitForTimeout(500); // Wait for animation
                             }
                         }
@@ -251,13 +270,15 @@ class ScreenshotService {
                         const firstButton = button.first();
                         const buttonText = await firstButton.textContent().catch(() => '');
                         const lowerButtonText = buttonText.toLowerCase();
-                        
+
                         // Click accept/close buttons, but not "manage choices" or "decline"
-                        if (lowerButtonText.includes('accept') || 
+                        if (lowerButtonText.includes('accept') ||
+                            lowerButtonText.includes('allow') ||
+                            lowerButtonText.includes('agree') ||
                             lowerButtonText.includes('got it') ||
                             lowerButtonText.includes('ok') ||
                             lowerButtonText.includes('close')) {
-                            await firstButton.click({ timeout: 1000 }).catch(() => {});
+                            await firstButton.click({ timeout: 1000 }).catch(() => { });
                             await page.waitForTimeout(500);
                         }
                     }
@@ -284,7 +305,7 @@ class ScreenshotService {
     async findElementWithText(page, text) {
         const cleanText = text.trim().replace(/\s+/g, ' ');
         const normalizedText = cleanText.toLowerCase();
-        
+
         // Also create a version with common punctuation removed for better matching
         const normalizedTextNoPunct = normalizedText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -301,18 +322,18 @@ class ScreenshotService {
                 for (const el of elements) {
                     const elText = (el.innerText || el.textContent || '').trim();
                     if (!elText) continue;
-                    
+
                     const normalizedElText = elText.toLowerCase().replace(/\s+/g, ' ');
                     const normalizedElTextNoPunct = normalizedElText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
-                    
+
                     // Check if element contains the target text (case-insensitive, with or without punctuation)
-                    const containsText = normalizedElText.includes(normalizedTarget) || 
-                                       normalizedElTextNoPunct.includes(normalizedTargetNoPunct);
-                    
+                    const containsText = normalizedElText.includes(normalizedTarget) ||
+                        normalizedElTextNoPunct.includes(normalizedTargetNoPunct);
+
                     if (containsText) {
                         const rect = el.getBoundingClientRect();
                         const area = rect.width * rect.height;
-                        
+
                         // Score based on how well the text matches
                         let score = 0;
                         if (normalizedElText === normalizedTarget || normalizedElTextNoPunct === normalizedTargetNoPunct) {
@@ -324,11 +345,11 @@ class ScreenshotService {
                         } else {
                             score = 60; // Contains
                         }
-                        
+
                         // Prefer smaller elements (more specific)
                         // Prefer visible elements
-                        if (rect.width > 0 && rect.height > 0 && 
-                            area > 0 && 
+                        if (rect.width > 0 && rect.height > 0 &&
+                            area > 0 &&
                             (score > bestScore || (score === bestScore && area < minArea))) {
                             minArea = area;
                             bestScore = score;
@@ -355,7 +376,7 @@ class ScreenshotService {
                     NodeFilter.SHOW_TEXT,
                     null
                 );
-                
+
                 let node;
                 const textNodes = [];
                 while (node = walker.nextNode()) {
@@ -364,12 +385,12 @@ class ScreenshotService {
                         textNodes.push({ node, text });
                     }
                 }
-                
+
                 // Check individual nodes
                 for (const { node, text } of textNodes) {
                     const normalizedText = text.toLowerCase().replace(/\s+/g, ' ');
                     const normalizedTextNoPunct = normalizedText.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
-                    
+
                     if (normalizedText.includes(normalizedTarget) || normalizedTextNoPunct.includes(normalizedTargetNoPunct)) {
                         // Find the parent element
                         let parent = node.parentElement;
@@ -384,18 +405,18 @@ class ScreenshotService {
                         return node.parentElement;
                     }
                 }
-                
+
                 // Check if text is split across adjacent text nodes
                 for (let i = 0; i < textNodes.length - 1; i++) {
                     const combinedText = (textNodes[i].text + ' ' + textNodes[i + 1].text).trim();
                     const normalizedCombined = combinedText.toLowerCase().replace(/\s+/g, ' ');
                     const normalizedCombinedNoPunct = normalizedCombined.replace(/[.,;:!?'"()\-]/g, ' ').replace(/\s+/g, ' ').trim();
-                    
+
                     if (normalizedCombined.includes(normalizedTarget) || normalizedCombinedNoPunct.includes(normalizedTargetNoPunct)) {
                         // Return the parent container of both nodes
                         let parent1 = textNodes[i].node.parentElement;
                         let parent2 = textNodes[i + 1].node.parentElement;
-                        
+
                         // Find common ancestor
                         while (parent1 && parent1 !== document.body) {
                             if (parent1.contains(parent2) || parent1 === parent2) {
@@ -403,15 +424,15 @@ class ScreenshotService {
                             }
                             parent1 = parent1.parentElement;
                         }
-                        
+
                         // Fallback to first node's parent
                         return textNodes[i].node.parentElement;
                     }
                 }
-                
+
                 return null;
             }, { targetText: cleanText, normalizedTarget: normalizedText, normalizedTargetNoPunct: normalizedTextNoPunct });
-            
+
             if (element && element.asElement()) {
                 return element.asElement();
             }
@@ -444,7 +465,7 @@ class ScreenshotService {
                         }
                         return null;
                     }, { targetText: cleanText, normalizedTarget: normalizedText });
-                    
+
                     if (frameElement && frameElement.asElement()) {
                         return frameElement.asElement();
                     }
@@ -494,7 +515,7 @@ class ScreenshotService {
                     const rect = current.getBoundingClientRect();
                     const classes = current.className.toLowerCase();
                     const tag = current.tagName.toLowerCase();
-                    
+
                     // Skip if parent is too large (likely contains multiple cards/sections)
                     if (rect.height > 800 || rect.width > 1400) {
                         current = current.parentElement;
@@ -507,8 +528,8 @@ class ScreenshotService {
                     const similarElements = children.filter(child => {
                         const childRect = child.getBoundingClientRect();
                         // Check if child has similar dimensions (likely a card or similar component)
-                        return childRect.height > 200 && childRect.width > 200 && 
-                               Math.abs(childRect.height - rect.height / children.length) < rect.height * 0.3;
+                        return childRect.height > 200 && childRect.width > 200 &&
+                            Math.abs(childRect.height - rect.height / children.length) < rect.height * 0.3;
                     });
 
                     // If parent has multiple similar children, it's likely a grid/list of cards - skip it
@@ -575,11 +596,11 @@ class ScreenshotService {
 
         // Ensure reasonable bounds but don't force minimums that are too large
         const viewport = page.viewportSize();
-        
+
         // Don't exceed viewport dimensions
         finalBox.width = Math.min(viewport.width, finalBox.width);
         finalBox.height = Math.min(viewport.height, finalBox.height);
-        
+
         // Ensure minimum reasonable size, but not too large
         finalBox.width = Math.max(300, Math.min(finalBox.width, 1200));
         finalBox.height = Math.max(200, Math.min(finalBox.height, 800));
@@ -601,7 +622,7 @@ class ScreenshotService {
     async injectStabilizerScript(page) {
         try {
             const contentScriptPath = path.resolve(__dirname, '..', 'chrome-extension', 'content.js');
-            
+
             if (fs.existsSync(contentScriptPath)) {
                 const contentScript = fs.readFileSync(contentScriptPath, 'utf8');
                 // Inject script before page loads using addInitScript
@@ -625,12 +646,12 @@ class ScreenshotService {
             // Note: Script should already be injected via addInitScript before navigation
             const maxWaitTime = 3000; // 3 seconds max wait
             const startTime = Date.now();
-            
+
             while (Date.now() - startTime < maxWaitTime) {
                 const isReady = await page.evaluate(() => {
                     return window.screenshotStabilizerReady === true;
                 }).catch(() => false);
-                
+
                 if (isReady) {
                     // Extension/script is ready, use its utilities
                     try {
@@ -640,21 +661,21 @@ class ScreenshotService {
                                 await window.screenshotStabilizer.waitForFonts();
                             }
                         });
-                        
+
                         // Wait for animations to complete (extension function returns a Promise)
                         await page.evaluate(async () => {
                             if (window.screenshotStabilizer && window.screenshotStabilizer.waitForAnimations) {
                                 await window.screenshotStabilizer.waitForAnimations();
                             }
                         });
-                        
+
                         // Force load lazy content (synchronous function)
                         await page.evaluate(() => {
                             if (window.screenshotStabilizer && window.screenshotStabilizer.forceLoadLazyContent) {
                                 window.screenshotStabilizer.forceLoadLazyContent();
                             }
                         });
-                        
+
                         // Wait for fully loaded state if available
                         const fullyLoaded = await page.evaluate(() => {
                             return new Promise((resolve) => {
@@ -675,22 +696,22 @@ class ScreenshotService {
                                 }
                             });
                         });
-                        
+
                         if (fullyLoaded) {
                             console.log('Screenshot stabilizer ready and page stabilized');
                         }
-                        
+
                         return true;
                     } catch (utilError) {
                         console.warn('Stabilizer utilities error (continuing anyway):', utilError.message);
                         return true; // Stabilizer is ready even if utilities fail
                     }
                 }
-                
+
                 // Wait a bit before checking again
                 await page.waitForTimeout(100);
             }
-            
+
             // If script was injected but not ready, try to initialize it manually
             try {
                 // Try to trigger initialization manually
@@ -706,19 +727,19 @@ class ScreenshotService {
                 });
                 // Give it a moment
                 await page.waitForTimeout(500);
-                
+
                 // Check again
                 const isReady = await page.evaluate(() => {
                     return window.screenshotStabilizerReady === true;
                 }).catch(() => false);
-                
+
                 if (isReady) {
                     return true;
                 }
             } catch (e) {
                 // Ignore initialization errors
             }
-            
+
             // Stabilizer didn't load in time, but continue anyway (fallback behavior)
             console.warn('Screenshot stabilizer did not initialize in time, continuing without stabilization features');
             return false;
@@ -806,7 +827,7 @@ class ScreenshotService {
                     const title = document.title || '';
                     return { bodyText: bodyText.substring(0, 200), title };
                 }).catch(() => ({ bodyText: '', title: '' }));
-                
+
                 throw new Error(`Page is blocked or inaccessible. Error: ${errorDetails.title || 'Access Denied'}. ${errorDetails.bodyText.substring(0, 100)}`);
             }
 
@@ -821,14 +842,14 @@ class ScreenshotService {
 
             // Wait for network to be idle (for dynamically loaded content)
             try {
-                await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+                await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { });
             } catch (e) {
                 // Ignore timeout, continue anyway
             }
 
             // Find element containing the message (with retry and scrolling)
             let element = await this.findElementWithText(page, messageText);
-            
+
             // If not found, try scrolling and searching again
             if (!element) {
                 console.log('Text not found on initial search, trying with page scroll...');
@@ -842,7 +863,7 @@ class ScreenshotService {
                 await page.waitForTimeout(1000);
                 element = await this.findElementWithText(page, messageText);
             }
-            
+
             // If still not found, try searching for partial matches with different lengths
             if (!element) {
                 console.log('Full text not found, trying partial matches...');
@@ -859,7 +880,7 @@ class ScreenshotService {
                     }
                 }
             }
-            
+
             // If still not found, try searching for key phrases
             if (!element) {
                 console.log('Trying to find key phrases from the text...');
@@ -875,7 +896,7 @@ class ScreenshotService {
                     }
                 }
             }
-            
+
             // Debug: Log page text if still not found
             if (!element) {
                 const pageText = await page.evaluate(() => {
@@ -894,7 +915,7 @@ class ScreenshotService {
                     .map(word => word.replace(/[.,;:!?'"()\-]/g, ''))
                     .filter(word => word.length >= 5)
                     .slice(0, 3); // Take top 3 key terms
-                
+
                 if (keyTerms.length > 0) {
                     console.log(`Exact text not found, searching for key terms: ${keyTerms.join(', ')}`);
                     for (const term of keyTerms) {
@@ -914,19 +935,19 @@ class ScreenshotService {
                 if (isErrorPage) {
                     throw new Error(`Page appears to be blocked or inaccessible. Cannot capture screenshot.`);
                 }
-                
+
                 try {
                     const fallbackElement = await page.evaluateHandle(() => {
                         // Find the main content area (article, main, or largest text container)
-                        const mainContent = document.querySelector('main, article, [role="main"]') || 
-                                          document.querySelector('.content, .main-content, #content, #main');
+                        const mainContent = document.querySelector('main, article, [role="main"]') ||
+                            document.querySelector('.content, .main-content, #content, #main');
                         if (mainContent) {
                             return mainContent;
                         }
                         // Fallback to body
                         return document.body;
                     });
-                    
+
                     if (fallbackElement && fallbackElement.asElement()) {
                         console.log('Using fallback: capturing main content area');
                         element = fallbackElement.asElement();
@@ -954,12 +975,12 @@ class ScreenshotService {
                         await page.waitForTimeout(500);
                     } else {
                         // Element might not be in viewport, try scrollIntoViewIfNeeded with shorter timeout
-                        await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                        await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => { });
                         await page.waitForTimeout(500);
                     }
                 } else {
                     // Element is visible, just ensure it's in view
-                    await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+                    await element.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => { });
                     await page.waitForTimeout(500);
                 }
             } catch (scrollError) {
@@ -1010,32 +1031,32 @@ class ScreenshotService {
 
         } catch (error) {
             console.error(`Error capturing screenshot for "${messageText}" at ${url}:`, error.message);
-            
+
             // If browser crashed, reset it and retry once
             if ((error.message.includes('Target page, context or browser has been closed') ||
-                 error.message.includes('browser has been closed') ||
-                 error.message.includes('Browser closed')) && retries > 0) {
+                error.message.includes('browser has been closed') ||
+                error.message.includes('Browser closed')) && retries > 0) {
                 console.warn('Browser crashed, resetting and retrying...');
                 this.browser = null; // Force browser recreation
                 await new Promise(resolve => setTimeout(resolve, 2000)); // Wait before retry
                 return this.captureMessage(url, messageText, messageId, retries - 1);
             }
-            
+
             // If text not found, return null instead of throwing (allows graceful handling)
             if (error.message.includes('Could not find text')) {
                 return null;
             }
-            
+
             return null;
         } finally {
             // Always cleanup page and context
             try {
-                if (page) await page.close().catch(() => {});
+                if (page) await page.close().catch(() => { });
             } catch (e) {
                 console.warn('Error closing page:', e.message);
             }
             try {
-                if (context) await context.close().catch(() => {});
+                if (context) await context.close().catch(() => { });
             } catch (e) {
                 console.warn('Error closing context:', e.message);
             }
@@ -1090,6 +1111,66 @@ class ScreenshotService {
         }
 
         return screenshots;
+    }
+    // Fetch full page content (HTML) using Playwright
+    async fetchPageContent(url) {
+        let context = null;
+        let page = null;
+
+        try {
+            // Initialize browser with retry
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await this.init();
+                    break;
+                } catch (initError) {
+                    if (i === 2) throw initError;
+                    console.warn(`Browser init failed, retrying... (${i + 1}/3)`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    this.browser = null;
+                }
+            }
+
+            // Create context
+            context = await this.browser.newContext({
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport: { width: 1920, height: 1080 }
+            });
+
+            page = await context.newPage();
+
+            // Navigate to page
+            console.log(`[Playwright] Fetching content for: ${url}`);
+            await page.goto(url, {
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
+            });
+
+            // Wait a bit for dynamic content
+            await page.waitForTimeout(2000);
+
+            // Handle popups/cookie banners using existing logic
+            await this.closePopups(page);
+
+            // Scroll to trigger lazy loading
+            await this.scrollPageToRevealContent(page);
+
+            // Get content
+            const content = await page.content();
+            return content;
+
+        } catch (error) {
+            console.error(`[Playwright] Error fetching content for ${url}:`, error.message);
+            throw error;
+        } finally {
+            // Cleanup
+            try {
+                if (page) await page.close().catch(() => { });
+            } catch (e) { }
+            try {
+                if (context) await context.close().catch(() => { });
+            } catch (e) { }
+        }
     }
 }
 

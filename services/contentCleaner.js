@@ -1,37 +1,34 @@
-/**
- * Content Cleaner Service
- * Ported from n8n "Code26" Node
- */
+const cheerio = require('cheerio');
 
 const removeHtmlTagsButKeepLinks = (htmlString) => {
     if (!htmlString || typeof htmlString !== "string") return ""; // Ensure valid input
 
-    const linkRegex = /<a\s+[^>]*?href=(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi;
-    let links = [];
+    try {
+        const $ = cheerio.load(htmlString);
 
-    // Preserve links by replacing them with placeholders
-    htmlString = htmlString.replace(linkRegex, (match, quote, url, text) => {
-        text = text.trim();
-        if (!text) text = url; // If no anchor text, use URL
-        links.push({ url, text });
-        return `[[LINK-${links.length - 1}]]`; // Temporary placeholder
-    });
+        // Remove unwanted elements
+        $('script, style, svg, iframe, noscript, meta, link, head').remove();
 
-    // Remove inline scripts, styles, and all HTML tags
-    let textOnly = htmlString
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')  // Remove scripts
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')    // Remove styles
-        .replace(/<\/?\w+[^>]*>/gi, '')                    // Remove remaining HTML tags
-        .replace(/\s+/g, ' ')                              // Collapse multiple spaces
-        .trim();
+        // Process links: Append URL to text if it exists
+        $('a').each((i, el) => {
+            const $el = $(el);
+            const href = $el.attr('href');
+            const text = $el.text().trim();
 
-    // Restore links in "Text (URL)" format
-    textOnly = textOnly.replace(/\[\[LINK-(\d+)\]\]/g, (match, index) => {
-        let link = links[parseInt(index, 10)];
-        return link ? `${link.text} (${link.url})` : "";
-    });
+            // Only modify if both text and href exist, and href is not a javascript/anchor link
+            if (href && text && !href.startsWith('javascript:') && !href.startsWith('#')) {
+                $el.text(`${text} (${href})`);
+            }
+        });
 
-    return textOnly;
+        // Get text and clean up whitespace
+        return $.text()
+            .replace(/\s+/g, ' ') // Collapse multiple spaces
+            .trim();
+    } catch (error) {
+        console.error('Error in cleanContent:', error.message);
+        return "";
+    }
 };
 
 // Export the function

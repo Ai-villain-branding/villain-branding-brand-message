@@ -10,16 +10,26 @@ const { categorizeMessages } = require('./messageCategorizer');
  * Orchestrates the full analysis workflow for a company
  * @param {string} companyUrl - The URL of the company to analyze
  * @param {Array<string>} specificPages - Optional array of specific pages to analyze (if provided, only these pages will be analyzed)
+ * @param {Function} progressCallback - Optional callback for progress updates: (type, message, progress) => void
  * @returns {Promise<Object>} - The analysis result
  */
-async function runAnalysisWorkflow(companyUrl, specificPages = null) {
-    console.log(`Starting analysis for: ${companyUrl}`);
+async function runAnalysisWorkflow(companyUrl, specificPages = null, progressCallback = null) {
+    // Helper function to send progress updates
+    const sendProgress = (type, message, progress = null) => {
+        console.log(`[${type}] ${message}${progress !== null ? ` (${progress}%)` : ''}`);
+        if (progressCallback) {
+            progressCallback(type, message, progress);
+        }
+    };
+
+    sendProgress('log', `Starting analysis for: ${companyUrl}`, 0);
     if (specificPages) {
-        console.log(`Specific pages mode: Analyzing ${specificPages.length} pages`);
+        sendProgress('log', `Specific pages mode: Analyzing ${specificPages.length} pages`);
     }
 
     try {
         // 1. Create or Get Company in Supabase
+        sendProgress('log', 'Setting up company record...', 5);
         let companyId;
         const { data: existingCompany } = await supabase
             .from('companies')
@@ -33,11 +43,11 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
         if (existingCompany) {
             companyId = existingCompany.id;
-            console.log(`Found existing company ID: ${companyId}`);
+            sendProgress('log', `Found existing company ID: ${companyId}`);
             // Update analysis mode if it changed
             await supabase
                 .from('companies')
-                .update({ 
+                .update({
                     analysis_mode: analysisMode,
                     pages_analyzed: pagesCount
                 })
@@ -46,9 +56,9 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             const domain = new URL(companyUrl).hostname;
             const { data: newCompany, error: createError } = await supabase
                 .from('companies')
-                .insert({ 
-                    url: companyUrl, 
-                    domain: domain, 
+                .insert({
+                    url: companyUrl,
+                    domain: domain,
                     name: domain,
                     analysis_mode: analysisMode,
                     pages_analyzed: pagesCount
@@ -58,25 +68,25 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
             if (createError) throw createError;
             companyId = newCompany.id;
-            console.log(`Created new company ID: ${companyId}`);
+            sendProgress('log', `Created new company ID: ${companyId}`);
         }
 
         // 2. Determine Pages to Visit
+        sendProgress('log', 'Discovering pages to analyze...', 10);
         let uniquePages;
-        
+
         if (specificPages && specificPages.length > 0) {
             // Mode: Specific pages only - use the provided pages
-            console.log('Using specific pages provided by user');
+            sendProgress('log', 'Using specific pages provided by user');
             uniquePages = [...new Set(specificPages)]; // Remove duplicates
-            console.log(`Analyzing ${uniquePages.length} specific pages:`, uniquePages);
+            sendProgress('log', `Analyzing ${uniquePages.length} specific pages`);
         } else {
             // Mode: Full website scraping - discover pages automatically
-            console.log('Fetching homepage for link analysis...');
+            sendProgress('log', 'Fetching homepage for link analysis...');
             const homepageHtml = await fetchHtml(companyUrl);
 
-            console.log('Analyzing links...');
+            sendProgress('log', 'Analyzing links to discover pages...', 15);
             const linkAnalysisResult = await analyzeLinks(homepageHtml, companyUrl);
-            console.log('Link Analysis Result:', JSON.stringify(linkAnalysisResult, null, 2));
 
             // Determine Pages to Visit (Analyze all pages)
             const pagesToVisit = new Set([companyUrl]); // Always include homepage
@@ -89,7 +99,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             if (linkAnalysisResult.careers_pages) linkAnalysisResult.careers_pages.forEach(url => pagesToVisit.add(url));
 
             uniquePages = Array.from(pagesToVisit);
-            console.log(`Identified ${uniquePages.length} pages to visit:`, uniquePages);
+            sendProgress('log', `Discovered ${uniquePages.length} pages to analyze`, 20);
         }
 
         // 4. Process Each Page
@@ -97,9 +107,12 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         const pageContents = []; // Store all page contents for cross-page analysis
 
         // First pass: Collect all page contents
-        for (const pageUrl of uniquePages) {
+        const totalPages = uniquePages.length;
+        for (let i = 0; i < totalPages; i++) {
+            const pageUrl = uniquePages[i];
+            const pageProgress = 20 + Math.floor((i / totalPages) * 30); // 20-50%
             try {
-                console.log(`Fetching page: ${pageUrl}`);
+                sendProgress('log', `Fetching page ${i + 1}/${totalPages}: ${pageUrl}`, pageProgress);
 
                 // Add a small delay to be nice to APIs
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -109,7 +122,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
                 // Skip if content is too short
                 if (cleanedContent.length < 100) {
-                    console.log(`Skipping ${pageUrl} - content too short`);
+                    sendProgress('log', `Skipping ${pageUrl} - content too short`);
                     continue;
                 }
 
@@ -118,11 +131,12 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                     content: cleanedContent
                 });
             } catch (err) {
-                console.error(`Error fetching page ${pageUrl}:`, err.message);
+                sendProgress('log', `Error fetching ${pageUrl}: ${err.message}`);
             }
         }
 
         // Second pass: Analyze all pages together so AI can find messages across all pages
+        sendProgress('log', 'Analyzing content with AI...', 55);
         // Build a structured object with all page contents
         const allPagesData = {};
         pageContents.forEach(page => {
@@ -130,12 +144,13 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         });
 
         try {
-            console.log(`Analyzing all ${pageContents.length} pages together to find cross-page messages...`);
+            sendProgress('log', `Analyzing all ${pageContents.length} pages together to find cross-page messages...`, 60);
 
             // Pass all page contents together so AI can search for messages across all pages
             const classificationResult = await classifyContent(allPagesData, Object.keys(allPagesData));
 
             if (classificationResult && classificationResult.messages) {
+                sendProgress('log', `AI found ${classificationResult.messages.length} potential messages`, 70);
                 // The AI should return messages with all locations where they appear
                 // But we'll also do a verification pass to ensure we catch all occurrences
                 const messagesWithVerifiedLocations = [];
@@ -143,10 +158,10 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                 for (const msg of classificationResult.messages) {
                     const messageText = msg.Message;
                     const reportedLocations = Array.isArray(msg.Locations) ? [...msg.Locations] : [];
-                    
+
                     // Verify and find all actual occurrences across all pages
                     const verifiedLocations = new Set(reportedLocations);
-                    
+
                     // Normalize message for searching (remove punctuation, normalize whitespace)
                     const normalizeForSearch = (text) => {
                         return text.toLowerCase()
@@ -154,54 +169,54 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                             .replace(/[^\w\s]/g, '') // Remove punctuation
                             .replace(/\s+/g, ' '); // Normalize whitespace
                     };
-                    
+
                     const normalizedMessage = normalizeForSearch(messageText);
-                    
+
                     // Search for this message text in all pages
                     for (const pageData of pageContents) {
                         const normalizedContent = normalizeForSearch(pageData.content);
-                        
+
                         // Check if message appears in this page's content
                         // Use word boundary matching for better accuracy
                         const messageWords = normalizedMessage.split(' ').filter(w => w.length > 0);
                         if (messageWords.length > 0) {
                             // Check if all significant words appear in the content
-                            const allWordsFound = messageWords.every(word => 
+                            const allWordsFound = messageWords.every(word =>
                                 normalizedContent.includes(word)
                             );
-                            
+
                             // Also check if the full phrase appears (for exact matches)
                             const fullPhraseFound = normalizedContent.includes(normalizedMessage);
-                            
+
                             if (allWordsFound || fullPhraseFound) {
                                 verifiedLocations.add(pageData.url);
                             }
                         }
                     }
-                    
+
                     // Convert Set to Array and use verified locations
                     const finalLocations = Array.from(verifiedLocations);
-                    
+
                     messagesWithVerifiedLocations.push({
                         ...msg,
                         Locations: finalLocations,
                         Count: finalLocations.length
                     });
                 }
-                
+
                 allMessages = messagesWithVerifiedLocations;
-                console.log(`Found ${allMessages.length} messages across all pages`);
+                sendProgress('log', `Verified ${allMessages.length} messages across all pages`, 75);
             }
 
         } catch (err) {
-            console.error(`Error analyzing pages:`, err.message);
+            sendProgress('log', `Error analyzing pages: ${err.message}`);
             // Fallback: analyze pages individually if batch analysis fails
-            console.log('Falling back to individual page analysis...');
+            sendProgress('log', 'Falling back to individual page analysis...');
             const allUrls = pageContents.map(p => p.url);
-            
+
             for (const pageData of pageContents) {
                 try {
-                    console.log(`Analyzing page: ${pageData.url}`);
+                    sendProgress('log', `Analyzing page: ${pageData.url}`);
                     const classificationResult = await classifyContent(pageData.content, allUrls);
 
                     if (classificationResult && classificationResult.messages) {
@@ -221,13 +236,13 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } catch (pageErr) {
-                    console.error(`Error analyzing page ${pageData.url}:`, pageErr.message);
+                    sendProgress('log', `Error analyzing page ${pageData.url}: ${pageErr.message}`);
                 }
             }
         }
 
         // 5. Save Messages to Supabase (Batched)
-        console.log(`Saving ${allMessages.length} messages to Supabase...`);
+        sendProgress('log', `Saving ${allMessages.length} messages to database...`, 80);
 
         // Helper function to normalize message content for comparison
         // Handles case, punctuation, and whitespace differences
@@ -248,13 +263,13 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
         // Clean up existing duplicates in database
         if (existingMessages && existingMessages.length > 0) {
-            console.log('Checking for existing duplicates in database...');
+            sendProgress('log', 'Checking for existing duplicates in database...');
             const duplicateGroups = new Map();
-            
+
             existingMessages.forEach(msg => {
                 const normalized = normalizeMessageContent(msg.content);
                 const key = `${msg.message_type}-${normalized}`;
-                
+
                 if (!duplicateGroups.has(key)) {
                     duplicateGroups.set(key, []);
                 }
@@ -264,12 +279,12 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
             // Merge duplicates
             for (const [key, messages] of duplicateGroups.entries()) {
                 if (messages.length > 1) {
-                    console.log(`Found ${messages.length} duplicate messages for key: ${key}, merging...`);
-                    
+                    sendProgress('log', `Found ${messages.length} duplicate messages, merging...`);
+
                     // Keep the first message, merge others into it
                     const primary = messages[0];
                     const toMerge = messages.slice(1);
-                    
+
                     // Collect all unique locations
                     let allLocations = [...(primary.locations || [])];
                     toMerge.forEach(msg => {
@@ -278,7 +293,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                         }
                     });
                     const uniqueLocations = [...new Set(allLocations)];
-                    
+
                     // Update primary message
                     await supabase
                         .from('brand_messages')
@@ -287,15 +302,13 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                             count: uniqueLocations.length
                         })
                         .eq('id', primary.id);
-                    
+
                     // Delete duplicate messages
                     const duplicateIds = toMerge.map(m => m.id);
                     await supabase
                         .from('brand_messages')
                         .delete()
                         .in('id', duplicateIds);
-                    
-                    console.log(`Merged ${toMerge.length} duplicates into message ID: ${primary.id}`);
                 }
             }
         }
@@ -328,7 +341,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                 // Update existing message with new locations
                 const newLocations = msg.Locations || [];
                 const mergedLocations = [...new Set([...existingDbMsg.locations, ...newLocations])];
-                
+
                 // Update in database
                 await supabase
                     .from('brand_messages')
@@ -337,7 +350,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
                         count: mergedLocations.length
                     })
                     .eq('id', existingDbMsg.id);
-                
+
                 continue; // Skip adding to uniqueMessages since it already exists
             }
 
@@ -370,18 +383,19 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         }
 
         if (uniqueMessages.length > 0) {
+            sendProgress('log', `Inserting ${uniqueMessages.length} new messages...`, 85);
             // Batch inserts to avoid timeouts (chunk size 50)
             const chunkSize = 50;
             for (let i = 0; i < uniqueMessages.length; i += chunkSize) {
                 const chunk = uniqueMessages.slice(i, i + chunkSize);
-                console.log(`Inserting batch ${Math.floor(i / chunkSize) + 1}/${Math.ceil(uniqueMessages.length / chunkSize)}...`);
+                sendProgress('log', `Inserting batch ${Math.floor(i / chunkSize) + 1}/${Math.ceil(uniqueMessages.length / chunkSize)}...`);
 
                 const { error: insertError } = await supabase
                     .from('brand_messages')
                     .insert(chunk);
 
                 if (insertError) {
-                    console.error('Error inserting batch:', insertError);
+                    sendProgress('log', `Error inserting batch: ${insertError.message}`);
                     // Continue to next batch instead of failing everything
                 }
             }
@@ -389,7 +403,7 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
         // 6. Categorize Messages with AI
         try {
-            console.log('Starting AI categorization...');
+            sendProgress('log', 'Starting AI categorization...', 90);
             // Fetch all messages for this company (including existing ones)
             const { data: allCompanyMessages, error: fetchError } = await supabase
                 .from('brand_messages')
@@ -398,16 +412,17 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
 
             if (!fetchError && allCompanyMessages && allCompanyMessages.length > 0) {
                 await categorizeMessages(companyId, allCompanyMessages);
-                console.log('AI categorization completed successfully.');
+                sendProgress('log', 'AI categorization completed successfully.', 95);
             } else {
-                console.log('No messages found for categorization.');
+                sendProgress('log', 'No messages found for categorization.');
             }
         } catch (categorizationError) {
             // Don't fail the workflow if categorization fails
-            console.error('Categorization failed (workflow continues):', categorizationError.message);
+            sendProgress('log', `Categorization failed (workflow continues): ${categorizationError.message}`);
         }
 
-        console.log('Analysis workflow completed successfully.');
+        sendProgress('log', 'Analysis workflow completed successfully.', 100);
+        // sendProgress('complete', 'Analysis complete!', 100); // Removed to prevent premature completion signal
         return {
             companyId,
             messageCount: uniqueMessages.length,
@@ -415,23 +430,47 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null) {
         };
 
     } catch (error) {
-        console.error('Workflow failed:', error);
+        sendProgress('error', `Workflow failed: ${error.message}`);
         throw error;
     }
 }
 
+const ScreenshotService = require('./screenshotService');
+// const screenshotService = new ScreenshotService(); // Removed global instance
+
 async function fetchHtml(url) {
+    const screenshotService = new ScreenshotService(); // Create new instance for each request
     try {
-        const response = await axios.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            },
-            timeout: 10000
-        });
-        return response.data;
-    } catch (error) {
-        console.error(`Failed to fetch ${url}:`, error.message);
-        throw error;
+        // Use Playwright for robust fetching (handles dynamic content & anti-bot)
+        console.log(`Fetching HTML for ${url} using Playwright...`);
+        const content = await screenshotService.fetchPageContent(url);
+        if (content && content.length > 0) {
+            return content;
+        }
+        throw new Error('Playwright returned empty content');
+    } catch (playwrightError) {
+        console.warn(`Playwright fetch failed for ${url}, falling back to axios:`, playwrightError.message);
+
+        // Fallback to axios with browser-like headers
+        try {
+            const response = await axios.get(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                },
+                timeout: 15000
+            });
+            return response.data;
+        } catch (axiosError) {
+            console.error(`Failed to fetch ${url} with axios:`, axiosError.message);
+            throw axiosError; // Throw original error if both fail
+        }
+    } finally {
+        // Ensure browser is closed to prevent resource leaks
+        await screenshotService.close().catch(() => { });
     }
 }
 
