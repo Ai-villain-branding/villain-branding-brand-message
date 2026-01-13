@@ -846,7 +846,7 @@
 
             // Render date groups
             if (dateGroups.length === 0) {
-                container.innerHTML = `< p class="text-center text-muted" > No screenshots generated yet.Go to Messages to generate screenshots.</p > `;
+                container.innerHTML = `<p class="text-center text-muted">No screenshots generated yet. Go to Messages to generate screenshots.</p>`;
                 return;
             }
 
@@ -859,24 +859,24 @@
 
                 const batchesHtml = batches.map(([batchKey, batchData], batchIndex) => {
                     const batchTime = formatBatchTime(batchData.timestamp);
-                    const batchLabel = batchTime ? ` - ${batchTime} ` : '';
+                    const batchLabel = batchTime ? ` - ${batchTime}` : '';
                     const proofCards = batchData.proofs.map(proof => renderProofCard(proof, messagesMap, company)).join('');
 
                     return `
-                < div class="batch-group" data - batch - id="${batchData.batchId || batchKey}" >
-                    ${batches.length > 1 ? `<div class="batch-label">Batch ${batches.length - batchIndex}${batchLabel}</div>` : ''}
-            <div class="date-proofs">
-                ${proofCards}
-            </div>
-                        </div >
-                `;
+                        <div class="batch-group" data-batch-id="${batchData.batchId || batchKey}">
+                            ${batches.length > 1 ? `<div class="batch-label">Batch ${batches.length - batchIndex}${batchLabel}</div>` : ''}
+                            <div class="date-proofs">
+                                ${proofCards}
+                            </div>
+                        </div>
+                    `;
                 }).join('');
 
                 return `
-                < div class="date-group" >
-                    <div class="date-label">${formattedDate}</div>
+                    <div class="date-group">
+                        <div class="date-label">${formattedDate}</div>
                         ${batchesHtml}
-                    </div >
+                    </div>
                 `;
             }).join('');
         }
