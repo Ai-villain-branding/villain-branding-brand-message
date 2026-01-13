@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "CloudFlare Bypass",
+  "version": "1.0.0",
+  "description": "Bypasses Cloudflare challenges and sends HTML to backend for evidence capture",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
+

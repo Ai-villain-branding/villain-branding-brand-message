@@ -24,16 +24,38 @@ AI-powered brand messaging analysis and visual validation system that crawls web
    npx playwright install chromium
    ```
 
-4. **Configure environment variables**
+4. **Set up Supabase database**
    
-   Copy `.env.example` to `.env` and add your OpenAI API key:
+   Run the database schema and migrations in order:
    ```bash
-   cp .env.example .env
+   # 1. Base schema
+   node run_schema.js "your_supabase_connection_string"
+   
+   # 2. Run migrations (in order)
+   # Via Supabase Dashboard SQL Editor, or using psql:
+   psql "your_connection_string" -f migration_add_analysis_mode.sql
+   psql "your_connection_string" -f migration_add_categorization.sql
+   psql "your_connection_string" -f migration_add_screenshot_status.sql
    ```
    
-   Edit `.env` and set:
-   ```
-   OPENAI_API_KEY=your_actual_api_key_here
+   See `MIGRATION_GUIDE.md` for detailed migration instructions.
+
+5. **Configure environment variables**
+   
+   Create a `.env` file with required variables:
+   ```bash
+   # Required
+   OPENAI_API_KEY=your_openai_api_key
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_ANON_KEY=your_anon_key
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+   
+   # Optional
+   PORT=3000
+   SCRAPPEY_API_KEY=your_scrappey_key  # For screenshot fallback
+   GOOGLE_DRIVE_CLIENT_ID=your_client_id  # For Google Drive mirroring
+   GOOGLE_DRIVE_CLIENT_SECRET=your_client_secret
+   GOOGLE_DRIVE_REFRESH_TOKEN=your_refresh_token
    ```
 
 ## Usage
@@ -103,43 +125,74 @@ For selected messages, the system:
 Start website analysis
 ```json
 {
-  "url": "https://example.com"
+  "url": "https://example.com",
+  "mode": "full_website",  // or "specific"
+  "pages": ["https://example.com/page1"]  // required if mode is "specific"
 }
 ```
 
-### GET /api/analysis/:id
-Get analysis status and progress
+### GET /api/companies
+Get all companies with analysis results
 
-### GET /api/messages/:analysisId
-Get extracted messages with categories and frequencies
+### GET /api/company/:id/messages
+Get brand messages for a company
+- Query param: `?include_categories=true` to include category info
 
-### POST /api/screenshots
-Generate screenshots for selected messages
+### GET /api/company/:id/categories
+Get message categories with grouped messages
+
+### GET /api/company/:id/screenshots
+Get all screenshots (proofs) for a company
+
+### POST /api/screenshot
+Generate screenshot for a message
 ```json
 {
-  "analysisId": "uuid",
-  "selectedMessages": ["msg-1", "msg-2"]
+  "companyId": "uuid",
+  "messageId": "uuid",
+  "url": "https://example.com/page",
+  "text": "Message text to capture"
 }
 ```
 
-### GET /api/screenshots/:jobId
-Get screenshot job status
+### PUT /api/screenshot/:id
+Update screenshot with cropped image (base64)
 
-### GET /api/screenshots/:id/image
-Retrieve screenshot image (PNG)
+### POST /api/screenshot/:id/copy
+Create a copy of screenshot with cropped image
+
+### DELETE /api/screenshot/:id
+Delete a screenshot
+
+### DELETE /api/company/:id
+Delete a company and all associated data
+
+### POST /api/company/:id/cleanup-duplicates
+Merge duplicate messages for a company
+
+### GET /api/health
+Health check endpoint - verifies database and service connectivity
 
 ## Configuration
 
-Environment variables in `.env`:
+### Environment Variables
 
-- `OPENAI_API_KEY` - Your OpenAI API key (required)
+**Required:**
+- `OPENAI_API_KEY` - Your OpenAI API key
+- `SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_ANON_KEY` - Supabase anonymous key
+- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key
+
+**Optional:**
 - `PORT` - Server port (default: 3000)
-- `MAX_CRAWL_PAGES` - Maximum pages to crawl (default: 50)
-- `MAX_CRAWL_DEPTH` - Maximum crawl depth (default: 3)
-- `CRAWL_DELAY_MS` - Delay between requests (default: 1000)
-- `REQUEST_TIMEOUT_MS` - Request timeout (default: 30000)
-- `SCREENSHOT_WIDTH` - Screenshot viewport width (default: 1200)
-- `SCREENSHOT_HEIGHT` - Screenshot viewport height (default: 800)
+- `SCRAPPEY_API_KEY` - For screenshot fallback service
+- `GOOGLE_DRIVE_CLIENT_ID` - For Google Drive mirroring
+- `GOOGLE_DRIVE_CLIENT_SECRET` - For Google Drive mirroring
+- `GOOGLE_DRIVE_REFRESH_TOKEN` - For Google Drive mirroring
+- `SCREENSHOT_WIDTH` - Screenshot viewport width (default: 1920)
+- `SCREENSHOT_HEIGHT` - Screenshot viewport height (default: 1080)
+- `CLOUDFLARE_EXTENSION_ENABLED` - Enable CloudFlare bypass (default: true)
+- `CLOUDFLARE_BYPASS_TIMEOUT` - Bypass timeout in ms (default: 180000)
 
 ## Project Structure
 
