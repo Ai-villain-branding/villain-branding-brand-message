@@ -916,18 +916,31 @@
             pollingInterval = setInterval(async () => {
                 try {
                     const idsParam = pendingIds.join(',');
+                    console.log('[Polling] Fetching status for IDs:', idsParam);
+
                     // Add timestamp to prevent browser caching (304 responses)
                     const response = await fetch(`/api/screenshots/status?ids=${idsParam}&_t=${Date.now()}`, {
                         cache: 'no-store'
                     });
                     const data = await response.json();
+                    console.log('[Polling] API response:', data);
 
-                    if (!data.screenshots) return;
+                    if (!data.screenshots || data.screenshots.length === 0) {
+                        console.log('[Polling] No screenshots in response');
+                        return;
+                    }
 
                     let allComplete = true;
+                    let successCount = 0;
+
                     data.screenshots.forEach(screenshot => {
+                        console.log(`[Polling] Screenshot ${screenshot.id}: status=${screenshot.status}, has_url=${!!screenshot.image_url}`);
+
                         const card = document.querySelector(`[data-screenshot-id="${screenshot.id}"]`);
-                        if (!card) return;
+                        if (!card) {
+                            console.warn(`[Polling] Card not found for ID: ${screenshot.id}`);
+                            return;
+                        }
 
                         // Update status indicator
                         const statusEl = card.querySelector('.status-indicator');
@@ -938,15 +951,27 @@
 
                         // If completed, update the image
                         if (screenshot.status === 'success' && screenshot.image_url) {
+                            console.log(`[Polling] Updating card ${screenshot.id} with image: ${screenshot.image_url}`);
                             const imgContainer = card.querySelector('.proof-image-container');
                             if (imgContainer) {
+                                // Remove status indicator
+                                if (statusEl) statusEl.remove();
+                                // Add edit button
+                                const editBtn = `<button class="edit-btn" onclick="editProof('${screenshot.id}', '${screenshot.image_url}', event)" title="Crop/Edit image">✎</button>`;
+                                // Check if edit button exists, if not add it
+                                if (!card.querySelector('.edit-btn')) {
+                                    card.insertAdjacentHTML('afterbegin', editBtn);
+                                }
                                 imgContainer.innerHTML = `<img src="${screenshot.image_url}" class="proof-image" onclick="openLightbox('${screenshot.image_url}')">`;
                             }
+                            successCount++;
                             // Remove from pending
                             pendingIds = pendingIds.filter(id => id !== screenshot.id);
                         } else if (screenshot.status === 'failed') {
+                            console.log(`[Polling] Screenshot ${screenshot.id} failed: ${screenshot.error_message}`);
                             const imgContainer = card.querySelector('.proof-image-container');
                             if (imgContainer) {
+                                if (statusEl) statusEl.remove();
                                 imgContainer.innerHTML = `<div class="proof-placeholder"><div>Failed to capture<br><small>${screenshot.error_message || 'Unknown error'}</small></div></div>`;
                             }
                             pendingIds = pendingIds.filter(id => id !== screenshot.id);
@@ -955,11 +980,22 @@
                         }
                     });
 
+                    console.log(`[Polling] Success: ${successCount}, Remaining pending: ${pendingIds.length}, All complete: ${allComplete}`);
+
                     if (allComplete || pendingIds.length === 0) {
                         console.log('[Polling] All screenshots complete, stopping poll');
                         clearInterval(pollingInterval);
                         sessionStorage.removeItem('pendingScreenshots');
                         sessionStorage.removeItem('currentBatchId');
+
+                        // If we had successes, reload page to ensure fresh data
+                        if (successCount > 0) {
+                            console.log('[Polling] Reloading page to show fresh screenshots...');
+                            // Short delay before reload to let user see the update
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 500);
+                        }
                     }
                 } catch (error) {
                     console.error('[Polling] Error:', error);
