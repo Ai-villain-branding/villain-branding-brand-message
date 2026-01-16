@@ -814,10 +814,13 @@ app.post('/api/screenshots/batch', async (req, res) => {
             await Promise.allSettled(chunk.map(async (record) => {
                 try {
                     // Update status to processing
-                    await supabase
+                    // Update status to processing
+                    const { error: processingError } = await supabase
                         .from('screenshots')
                         .update({ status: 'processing', attempt_count: 1 })
                         .eq('id', record.id);
+
+                    if (processingError) throw processingError;
 
                     console.log(`[Batch Screenshot] Processing ${record.id}: ${record.url}`);
 
@@ -841,7 +844,8 @@ app.post('/api/screenshots/batch', async (req, res) => {
                             .getPublicUrl(filename);
 
                         // Update record with success
-                        await supabase
+                        // Update record with success
+                        const { error: successError } = await supabase
                             .from('screenshots')
                             .update({
                                 status: 'success',
@@ -849,6 +853,8 @@ app.post('/api/screenshots/batch', async (req, res) => {
                                 captured_at: new Date().toISOString()
                             })
                             .eq('id', record.id);
+
+                        if (successError) throw successError;
 
                         console.log(`[Batch Screenshot] Success: ${record.id}`);
                     } else {
