@@ -849,8 +849,7 @@ app.post('/api/screenshots/batch', async (req, res) => {
                             .from('screenshots')
                             .update({
                                 status: 'success',
-                                image_url: urlData.publicUrl,
-                                captured_at: new Date().toISOString()
+                                image_url: urlData.publicUrl
                             })
                             .eq('id', record.id);
 
