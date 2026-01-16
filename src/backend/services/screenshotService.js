@@ -29,7 +29,7 @@ class ScreenshotService {
             }
 
             // Get absolute path to chrome extension directory
-            const extensionPath = path.resolve(__dirname, '..', 'chrome-extension');
+            const extensionPath = path.resolve(__dirname, '..', '..', '..', 'extensions', 'chrome-extension');
 
             // Verify extension directory exists
             if (!fs.existsSync(extensionPath)) {
@@ -621,7 +621,7 @@ class ScreenshotService {
     // Inject content script directly into page (fallback when extension doesn't load)
     async injectStabilizerScript(page) {
         try {
-            const contentScriptPath = path.resolve(__dirname, '..', 'chrome-extension', 'content.js');
+            const contentScriptPath = path.resolve(__dirname, '..', '..', '..', 'extensions', 'chrome-extension', 'content.js');
 
             if (fs.existsSync(contentScriptPath)) {
                 const contentScript = fs.readFileSync(contentScriptPath, 'utf8');

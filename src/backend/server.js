@@ -824,12 +824,12 @@ app.post('/api/screenshots/batch', async (req, res) => {
                     // Capture screenshot
                     const result = await screenshotService.captureMessage(record.url, record.text, record.messageId);
 
-                    if (result && result.imageBuffer) {
+                    if (result && result.buffer) {
                         // Upload to Supabase storage
                         const filename = `${record.id}.png`;
                         const { data: uploadData, error: uploadError } = await supabase.storage
                             .from('screenshots')
-                            .upload(filename, result.imageBuffer, {
+                            .upload(filename, result.buffer, {
                                 contentType: 'image/png',
                                 upsert: true
                             });
