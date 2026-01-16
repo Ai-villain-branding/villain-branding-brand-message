@@ -166,6 +166,14 @@ class ScreenshotService {
                 await page.waitForTimeout(1000); // Wait for animation
             }
 
+            // Strategy 0: Press Escape key (often closes modals)
+            try {
+                await page.keyboard.press('Escape');
+                await page.waitForTimeout(500);
+            } catch (e) {
+                // Ignore key press errors
+            }
+
             // Common selectors for popups, modals, and cookie banners
             const popupSelectors = [
                 // Priority 1: OneTrust / CookiePro
@@ -214,6 +222,10 @@ class ScreenshotService {
                 'button:has-text("Close")',
                 'button:has-text("×")',
                 'button:has-text("✕")',
+                'div[role="button"]:has-text("×")',
+                'div[role="button"]:has-text("✕")',
+                'span:has-text("×")',
+                'span:has-text("✕")',
 
                 // Contact/Newsletter popups
                 '[aria-label="Close"]',
@@ -236,7 +248,11 @@ class ScreenshotService {
                 '[class*="modal"] [class*="close"]',
                 '[class*="popup"] [class*="close"]',
                 '[class*="dialog"] [class*="close"]',
-                '[class*="banner"] [class*="close"]'
+                '[class*="banner"] [class*="close"]',
+
+                // Aggressive generic close buttons (last resort)
+                '.close',
+                '[class*="close"]'
             ];
 
             // Try to find and click close buttons
