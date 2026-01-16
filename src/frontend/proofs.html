@@ -894,7 +894,23 @@
                 pendingIds = pending.map(p => p.id);
             }
 
-            console.log(`[Polling] Starting status polling for ${pendingIds.length} screenshots`);
+            // If pendingIds is still empty but we have a batchId, get IDs from rendered cards
+            if (pendingIds.length === 0) {
+                const pendingCards = document.querySelectorAll('.proof-card .status-pending, .proof-card .status-processing');
+                pendingCards.forEach(statusEl => {
+                    const card = statusEl.closest('.proof-card');
+                    if (card && card.dataset.screenshotId) {
+                        pendingIds.push(card.dataset.screenshotId);
+                    }
+                });
+            }
+
+            if (pendingIds.length === 0) {
+                console.log('[Polling] No pending screenshots found to poll');
+                return;
+            }
+
+            console.log(`[Polling] Starting status polling for ${pendingIds.length} screenshots:`, pendingIds);
 
 
             pollingInterval = setInterval(async () => {
