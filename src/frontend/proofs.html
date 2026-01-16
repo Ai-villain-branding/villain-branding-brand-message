@@ -916,7 +916,10 @@
             pollingInterval = setInterval(async () => {
                 try {
                     const idsParam = pendingIds.join(',');
-                    const response = await fetch(`/api/screenshots/status?ids=${idsParam}`);
+                    // Add timestamp to prevent browser caching (304 responses)
+                    const response = await fetch(`/api/screenshots/status?ids=${idsParam}&_t=${Date.now()}`, {
+                        cache: 'no-store'
+                    });
                     const data = await response.json();
 
                     if (!data.screenshots) return;

@@ -898,6 +898,11 @@ app.get('/api/screenshots/status', async (req, res) => {
 
         if (error) throw error;
 
+        // Prevent caching - this endpoint returns dynamic data
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+
         res.json({ screenshots: data });
     } catch (error) {
         console.error('[Screenshot Status] Error:', error);
