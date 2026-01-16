@@ -168,26 +168,27 @@ class ScreenshotService {
 
             // Common selectors for popups, modals, and cookie banners
             const popupSelectors = [
-                // Other OneTrust variants
+                // Priority 1: OneTrust / CookiePro
                 '#onetrust-banner-sdk .save-preference-btn-handler',
                 '#onetrust-close-btn-container button',
+                '#onetrust-accept-btn-handler',
 
                 // Cookie consent banners
-                '[id*="cookie"]',
-                '[class*="cookie"]',
-                '[id*="Cookie"]',
-                '[class*="Cookie"]',
-                '[id*="consent"]',
-                '[class*="consent"]',
-                '[id*="gdpr"]',
-                '[class*="gdpr"]',
-                '[id*="privacy"]',
-                '[class*="privacy"]',
+                '[id*="cookie"] button',
+                '[class*="cookie"] button',
+                '[id*="consent"] button',
+                '[class*="consent"] button',
+                '[id*="gdpr"] button',
+                '[class*="gdpr"] button',
+                '[id*="privacy"] button',
+                '[class*="privacy"] button',
+
                 // Common close buttons
                 'button[aria-label*="close" i]',
                 'button[aria-label*="dismiss" i]',
                 'button[aria-label*="accept" i]',
                 'button[aria-label*="decline" i]',
+
                 // Modal close buttons
                 '.modal-close',
                 '.close-modal',
@@ -195,28 +196,47 @@ class ScreenshotService {
                 '.close-popup',
                 '[class*="close-button"]',
                 '[class*="close-btn"]',
+
                 // Accept/Close buttons in cookie banners
                 'button:has-text("Accept")',
                 'button:has-text("Accept All")',
                 'button:has-text("Accept All Cookies")',
+                'button:has-text("I Accept")',
+                'button:has-text("Agree")',
+                'button:has-text("I Agree")',
+                'button:has-text("Got it")',
+                'button:has-text("Okay")',
+                'button:has-text("Allow all")',
                 'button:has-text("Allow")',
                 'button:has-text("Allow All")',
                 'button:has-text("Allow Cookies")',
-                'button:has-text("I Accept")',
-                'button:has-text("I Agree")',
-                'button:has-text("Agree")',
-                'button:has-text("Got it")',
                 'button:has-text("OK")',
                 'button:has-text("Close")',
                 'button:has-text("×")',
                 'button:has-text("✕")',
-                // Overlay close buttons
+
+                // Contact/Newsletter popups
+                '[aria-label="Close"]',
+                '[aria-label="close"]',
+                '.close-icon',
+                '.icon-close',
+                'svg[data-icon="close"]',
+                'button:has-text("No thanks")',
+                'button:has-text("Not now")',
+                'button:has-text("Maybe later")',
+                'a:has-text("No thanks")',
+
+                // Generic overlay/modal close buttons
+                '[class*="overlay"] .close',
+                '[class*="modal"] .close',
+                '[class*="popup"] .close',
+                '[class*="dialog"] .close',
+                '[class*="banner"] .close',
                 '[class*="overlay"] [class*="close"]',
-                '[class*="banner"] [class*="close"]',
-                // Common modal/popup containers
                 '[class*="modal"] [class*="close"]',
                 '[class*="popup"] [class*="close"]',
                 '[class*="dialog"] [class*="close"]',
+                '[class*="banner"] [class*="close"]'
             ];
 
             // Try to find and click close buttons
@@ -817,7 +837,15 @@ class ScreenshotService {
             await this.waitForExtensionReady(page);
 
             // Wait a bit for any animations and dynamic content
+            // Wait a bit for any animations and dynamic content
             await page.waitForTimeout(2000);
+
+            // Move mouse to top-left corner to avoid triggering hover menus
+            try {
+                await page.mouse.move(0, 0);
+            } catch (e) {
+                // Ignore mouse move errors
+            }
 
             // Check if page is an error/blocked page before proceeding
             const isErrorPage = await this.detectErrorPage(page);
