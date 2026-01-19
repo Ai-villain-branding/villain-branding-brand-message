@@ -212,12 +212,30 @@ class ConsentNeutralizer {
     // We watch for common banner containers and hide them immediately.
     const bannerSelectors = [
         '#onetrust-consent-sdk',
+        '#onetrust-banner-sdk',
+        '#onetrust-pc-sdk',
+        '#ot-pc-content',
+        '#ot-sdk-btn-floating',
+        '.onetrust-pc-dark-filter',
+        '.ot-sdk-row',
+        '.optanon-alert-box-wrapper',
         '#CybotCookiebotDialog',
+        '#CybotCookiebotDialogBodyUnderlay',
         '.qc-cmp2-container',
         '[class*="cookie-banner"]',
         '[class*="consent-banner"]',
+        '[class*="cookie-notice"]',
+        '[class*="cookie-bar"]',
         '[id*="cookie-banner"]',
-        '[id*="consent-banner"]'
+        '[id*="consent-banner"]',
+        '[id*="cookie-notice"]',
+        '[id*="cookie-bar"]',
+        // Generic privacy/GDPR
+        '[class*="privacy-banner"]',
+        '[class*="gdpr-banner"]',
+        '[role="dialog"][aria-label*="cookie" i]',
+        '[role="dialog"][aria-label*="consent" i]',
+        '[role="dialog"][aria-label*="privacy" i]'
     ];
     
     const hideBanners = () => {
@@ -399,20 +417,32 @@ class ConsentNeutralizer {
 
         try {
             const css = `
-                /* OneTrust */
+                /* OneTrust - Complete coverage */
                 #onetrust-consent-sdk,
                 #onetrust-banner-sdk,
+                #onetrust-pc-sdk,
+                #ot-pc-content,
+                #ot-sdk-btn-floating,
                 .onetrust-pc-dark-filter,
-                .optanon-alert-box-wrapper {
+                .ot-sdk-container,
+                .ot-pc-header,
+                .ot-pc-content,
+                .ot-pc-footer,
+                .optanon-alert-box-wrapper,
+                [id^="onetrust-"],
+                [class^="onetrust-"],
+                [class*="ot-sdk-"] {
                     display: none !important;
                     visibility: hidden !important;
                     opacity: 0 !important;
                     pointer-events: none !important;
+                    z-index: -9999 !important;
                 }
                 
                 /* Cookiebot */
                 #CybotCookiebotDialog,
-                #CybotCookiebotDialogBodyUnderlay {
+                #CybotCookiebotDialogBodyUnderlay,
+                [id^="CybotCookiebot"] {
                     display: none !important;
                     visibility: hidden !important;
                 }
@@ -423,17 +453,35 @@ class ConsentNeutralizer {
                     display: none !important;
                 }
                 
+                /* TrustArc */
+                #truste-consent-track,
+                .truste_box_overlay,
+                .truste_box_overlay_inner {
+                    display: none !important;
+                }
+                
+                /* Didomi */
+                #didomi-host,
+                .didomi-popup-container {
+                    display: none !important;
+                }
+                
                 /* Generic cookie banners */
                 [class*="cookie-banner"],
                 [class*="consent-banner"],
                 [class*="gdpr-banner"],
+                [class*="cookie-notice"],
+                [class*="cookie-consent"],
+                [class*="cookie-bar"],
+                [class*="privacy-banner"],
                 [id*="cookie-banner"],
                 [id*="consent-banner"],
                 [id*="gdpr-banner"],
-                [class*="cookie-notice"],
-                [class*="cookie-consent"],
+                [id*="cookie-notice"],
+                [id*="cookie-bar"],
                 [role="dialog"][aria-label*="cookie" i],
-                [role="dialog"][aria-label*="consent" i] {
+                [role="dialog"][aria-label*="consent" i],
+                [role="dialog"][aria-label*="privacy" i] {
                     display: none !important;
                     visibility: hidden !important;
                 }
@@ -442,6 +490,10 @@ class ConsentNeutralizer {
                 body {
                     overflow: auto !important;
                     position: static !important;
+                }
+                
+                html {
+                    overflow: auto !important;
                 }
                 
                 /* Remove overlay backgrounds */

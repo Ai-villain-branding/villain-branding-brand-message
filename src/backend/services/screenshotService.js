@@ -2,6 +2,7 @@ const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const ConsentNeutralizer = require('./consentNeutralizer');
 
 class ScreenshotService {
     constructor() {
@@ -10,6 +11,8 @@ class ScreenshotService {
         this.minHeight = 600;
         this.defaultWidth = parseInt(process.env.SCREENSHOT_WIDTH) || 1440;
         this.defaultHeight = parseInt(process.env.SCREENSHOT_HEIGHT) || 900;
+        // Initialize consent neutralizer for bypassing cookie consent popups
+        this.consentNeutralizer = new ConsentNeutralizer({ loggingLevel: 'info' });
     }
 
     // Initialize browser
@@ -158,13 +161,64 @@ class ScreenshotService {
     // Close popups, modals, cookie banners, etc.
     async closePopups(page) {
         try {
-            // Priority 1: OneTrust / CookiePro (Most common and problematic)
+            // Priority 0: Forcefully hide OneTrust via DOM manipulation (most reliable)
+            await page.evaluate(() => {
+                // Hide OneTrust consent SDK entirely
+                const otConsentSdk = document.getElementById('onetrust-consent-sdk');
+                if (otConsentSdk) {
+                    otConsentSdk.style.display = 'none';
+                    otConsentSdk.style.visibility = 'hidden';
+                    console.log('[Popup Close] OneTrust consent SDK hidden via DOM');
+                }
+
+                // Hide OneTrust banner
+                const otBanner = document.getElementById('onetrust-banner-sdk');
+                if (otBanner) {
+                    otBanner.style.display = 'none';
+                    otBanner.style.visibility = 'hidden';
+                    console.log('[Popup Close] OneTrust banner hidden via DOM');
+                }
+
+                // Hide any OneTrust overlay
+                const otOverlay = document.querySelector('.onetrust-pc-dark-filter');
+                if (otOverlay) {
+                    otOverlay.style.display = 'none';
+                    console.log('[Popup Close] OneTrust overlay hidden via DOM');
+                }
+
+                // Restore body scroll
+                document.body.style.overflow = 'auto';
+                document.body.style.position = 'static';
+                document.body.classList.remove('onetrust-consent-sdk-modal-open');
+            }).catch(() => { });
+
+            // Priority 1: Try clicking OneTrust "Allow All" button (matches screenshot)
+            try {
+                const allowAllBtn = await page.$('#onetrust-pc-btn-handler, .ot-pc-refuse-all-handler, #accept-recommended-btn-handler');
+                if (allowAllBtn && await allowAllBtn.isVisible()) {
+                    console.log('Found OneTrust Allow All button, clicking...');
+                    await allowAllBtn.click();
+                    await page.waitForTimeout(500);
+                }
+            } catch (e) { }
+
+            // Priority 2: Try the standard accept button
             const oneTrustBtn = await page.$('#onetrust-accept-btn-handler');
             if (oneTrustBtn && await oneTrustBtn.isVisible()) {
                 console.log('Found OneTrust accept button, clicking...');
                 await oneTrustBtn.click();
                 await page.waitForTimeout(1000); // Wait for animation
             }
+
+            // Priority 3: Try clicking any button with "Allow All" text
+            try {
+                const allowAllByText = await page.getByRole('button', { name: /allow all/i }).first();
+                if (await allowAllByText.isVisible().catch(() => false)) {
+                    console.log('Found "Allow All" button by text, clicking...');
+                    await allowAllByText.click();
+                    await page.waitForTimeout(500);
+                }
+            } catch (e) { }
 
             // Strategy 0: Press Escape key (often closes modals)
             try {
@@ -822,13 +876,26 @@ class ScreenshotService {
             // Create context with timeout
             context = await this.browser.newContext({
                 viewport: { width: this.defaultWidth, height: this.defaultHeight },
-                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                timeout: 30000
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                timeout: 30000,
+                // Bypass some bot detection
+                bypassCSP: true,
+                ignoreHTTPSErrors: true
             });
+
+            // CRITICAL: Inject consent neutralization BEFORE creating page
+            // This overrides OneTrust, Cookiebot, and other CMPs at the API level
+            this.consentNeutralizer.resetStats();
+            await this.consentNeutralizer.injectCMPNeutralizer(context);
+            await this.consentNeutralizer.injectConsentState(context);
+            console.log('[Screenshot] CMP neutralization applied to context');
 
             page = await context.newPage({
                 timeout: 30000
             });
+
+            // Setup safe network handling (blocks trackers but allows consent scripts)
+            await this.consentNeutralizer.setupSafeNetworkHandling(page);
 
             // Inject stabilizer script before navigation (works better than extension in headless mode)
             await this.injectStabilizerScript(page);
@@ -852,7 +919,10 @@ class ScreenshotService {
             // Wait for Chrome extension/script to be ready and stabilize the page
             await this.waitForExtensionReady(page);
 
-            // Wait a bit for any animations and dynamic content
+            // Apply CSS overlay removal for any consent banners that still appear
+            await this.consentNeutralizer.applyOverlayCSS(page);
+            console.log('[Screenshot] CSS overlay removal applied');
+
             // Wait a bit for any animations and dynamic content
             await page.waitForTimeout(2000);
 
