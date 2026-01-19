@@ -923,6 +923,10 @@ class ScreenshotService {
             await this.consentNeutralizer.applyOverlayCSS(page);
             console.log('[Screenshot] CSS overlay removal applied');
 
+            // Apply DOM cleanup to physically remove overlays
+            await this.consentNeutralizer.removeOverlaysFromDOM(page);
+            console.log('[Screenshot] DOM cleanup applied');
+
             // Wait a bit for any animations and dynamic content
             await page.waitForTimeout(2000);
 

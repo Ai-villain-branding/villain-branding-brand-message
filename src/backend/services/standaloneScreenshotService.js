@@ -241,6 +241,9 @@ class StandaloneScreenshotService {
             // LAYER 4: CSS Overlay Removal
             await this.neutralizer.applyOverlayCSS(page);
 
+            // LAYER 4B: DOM Cleanup - physically remove overlays
+            await this.neutralizer.removeOverlaysFromDOM(page);
+
             // Wait for dynamic content
             await page.waitForTimeout(this.waitTimeAfterLoad);
 

@@ -90,12 +90,7 @@ class ConsentNeutralizer {
                 specialFeatureOptins: {},
                 publisher: {
                     consents: {},
-                    legitimateInterests: {},
-                    customPurpose: {
-                        consents: {},
-                        legitimateInterests: {}
-                    },
-                    restrictions: {}
+                    legitimateInterests: {}
                 }
             }, true);
         } else if (command === 'addEventListener') {
@@ -206,70 +201,183 @@ class ConsentNeutralizer {
     }
     
     // ============================================================
-    // Prevent Banner Display via MutationObserver
+    // AGGRESSIVE: Prevent ALL Modal/Dialog Display
     // ============================================================
-    // WHY: Even with API overrides, some CMPs still inject DOM elements.
-    // We watch for common banner containers and hide them immediately.
-    const bannerSelectors = [
-        '#onetrust-consent-sdk',
-        '#onetrust-banner-sdk',
-        '#onetrust-pc-sdk',
-        '#ot-pc-content',
-        '#ot-sdk-btn-floating',
-        '.onetrust-pc-dark-filter',
-        '.ot-sdk-row',
-        '.optanon-alert-box-wrapper',
-        '#CybotCookiebotDialog',
-        '#CybotCookiebotDialogBodyUnderlay',
-        '.qc-cmp2-container',
-        '[class*="cookie-banner"]',
-        '[class*="consent-banner"]',
-        '[class*="cookie-notice"]',
-        '[class*="cookie-bar"]',
-        '[id*="cookie-banner"]',
-        '[id*="consent-banner"]',
-        '[id*="cookie-notice"]',
-        '[id*="cookie-bar"]',
-        // Generic privacy/GDPR
-        '[class*="privacy-banner"]',
-        '[class*="gdpr-banner"]',
-        '[role="dialog"][aria-label*="cookie" i]',
-        '[role="dialog"][aria-label*="consent" i]',
-        '[role="dialog"][aria-label*="privacy" i]'
-    ];
-    
-    const hideBanners = () => {
-        bannerSelectors.forEach(selector => {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(el => {
-                if (el && el.style) {
-                    el.style.display = 'none';
-                    el.style.visibility = 'hidden';
-                    el.style.opacity = '0';
-                    el.style.pointerEvents = 'none';
-                }
-            });
+    // WHY: Many sites show location selectors, popups, interstitials
+    // We aggressively hide ALL dialogs, modals, and overlays
+    const hideOverlays = () => {
+        // Hide all dialogs and modals
+        const dialogSelectors = [
+            // Cookie/Consent banners
+            '#onetrust-consent-sdk',
+            '#onetrust-banner-sdk',
+            '#onetrust-pc-sdk',
+            '#ot-pc-content',
+            '#ot-sdk-btn-floating',
+            '.onetrust-pc-dark-filter',
+            '.ot-sdk-row',
+            '.optanon-alert-box-wrapper',
+            '#CybotCookiebotDialog',
+            '#CybotCookiebotDialogBodyUnderlay',
+            '.qc-cmp2-container',
+            '[class*="cookie-banner"]',
+            '[class*="consent-banner"]',
+            '[class*="cookie-notice"]',
+            '[class*="cookie-bar"]',
+            '[id*="cookie-banner"]',
+            '[id*="consent-banner"]',
+            '[id*="cookie-notice"]',
+            '[id*="cookie-bar"]',
+            '[class*="privacy-banner"]',
+            '[class*="gdpr-banner"]',
+            
+            // Generic modals and dialogs
+            '[role="dialog"]',
+            '[role="alertdialog"]',
+            '[aria-modal="true"]',
+            '.modal',
+            '.Modal',
+            '.dialog',
+            '.Dialog',
+            '.popup',
+            '.Popup',
+            '.overlay',
+            '.Overlay',
+            '[class*="modal"]',
+            '[class*="Modal"]',
+            '[class*="dialog"]',
+            '[class*="Dialog"]',
+            '[class*="popup"]',
+            '[class*="Popup"]',
+            '[class*="overlay"]',
+            '[class*="Overlay"]',
+            '[id*="modal"]',
+            '[id*="Modal"]',
+            '[id*="dialog"]',
+            '[id*="Dialog"]',
+            '[id*="popup"]',
+            '[id*="Popup"]',
+            
+            // Chat widgets
+            '[class*="chat"]',
+            '[class*="Chat"]',
+            '[id*="chat"]',
+            '[id*="Chat"]',
+            '[class*="intercom"]',
+            '[id*="intercom"]',
+            '[class*="drift"]',
+            '[id*="drift"]',
+            '[class*="zendesk"]',
+            '[id*="zendesk"]',
+            
+            // Newsletter/subscription popups
+            '[class*="newsletter"]',
+            '[class*="subscribe"]',
+            '[class*="signup"]',
+            '[id*="newsletter"]',
+            '[id*="subscribe"]',
+            '[id*="signup"]',
+            
+            // Location/language selectors
+            '[class*="location"]',
+            '[class*="language"]',
+            '[class*="region"]',
+            '[class*="country"]',
+            '[id*="location"]',
+            '[id*="language"]',
+            '[id*="region"]',
+            '[id*="country"]',
+            
+            // Backdrop/underlay elements
+            '.backdrop',
+            '.Backdrop',
+            '.underlay',
+            '.Underlay',
+            '[class*="backdrop"]',
+            '[class*="Backdrop"]',
+            '[class*="underlay"]',
+            '[class*="Underlay"]'
+        ];
+        
+        let hiddenCount = 0;
+        dialogSelectors.forEach(selector => {
+            try {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => {
+                    if (el && el.style && el.style.display !== 'none') {
+                        // Check if element is actually visible and blocking content
+                        const rect = el.getBoundingClientRect();
+                        const computedStyle = window.getComputedStyle(el);
+                        const zIndex = parseInt(computedStyle.zIndex) || 0;
+                        
+                        // Hide if: has high z-index OR is positioned fixed/absolute OR is a dialog role
+                        if (zIndex > 100 || 
+                            computedStyle.position === 'fixed' || 
+                            computedStyle.position === 'absolute' ||
+                            el.getAttribute('role') === 'dialog' ||
+                            el.getAttribute('role') === 'alertdialog' ||
+                            el.getAttribute('aria-modal') === 'true') {
+                            
+                            el.style.setProperty('display', 'none', 'important');
+                            el.style.setProperty('visibility', 'hidden', 'important');
+                            el.style.setProperty('opacity', '0', 'important');
+                            el.style.setProperty('pointer-events', 'none', 'important');
+                            el.style.setProperty('z-index', '-9999', 'important');
+                            el.remove(); // Actually remove from DOM
+                            hiddenCount++;
+                        }
+                    }
+                });
+            } catch (e) {
+                // Ignore selector errors
+            }
         });
+        
+        if (hiddenCount > 0) {
+            console.log('[CMP Neutralizer] Hid ' + hiddenCount + ' overlay elements');
+        }
     };
     
-    // Run immediately and on DOM changes
+    // Run immediately and repeatedly
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', hideBanners);
+        document.addEventListener('DOMContentLoaded', hideOverlays);
     } else {
-        hideBanners();
+        hideOverlays();
     }
     
-    // Watch for dynamically added banners
-    const observer = new MutationObserver(hideBanners);
+    // Watch for dynamically added overlays - check every 500ms
+    setInterval(hideOverlays, 500);
+    
+    // Also watch with MutationObserver for immediate response
+    const observer = new MutationObserver(hideOverlays);
     if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });
     } else {
         document.addEventListener('DOMContentLoaded', () => {
-            observer.observe(document.body, { childList: true, subtree: true });
+            if (document.body) {
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
         });
     }
     
-    console.log('[CMP Neutralizer] All consent APIs neutralized');
+    // ============================================================
+    // Restore Body Scrolling
+    // ============================================================
+    // WHY: Modals often disable body scrolling
+    const restoreScrolling = () => {
+        if (document.body) {
+            document.body.style.setProperty('overflow', 'auto', 'important');
+            document.body.style.setProperty('position', 'static', 'important');
+            document.body.style.setProperty('height', 'auto', 'important');
+        }
+        if (document.documentElement) {
+            document.documentElement.style.setProperty('overflow', 'auto', 'important');
+        }
+    };
+    
+    setInterval(restoreScrolling, 500);
+    
+    console.log('[CMP Neutralizer] All consent APIs neutralized + aggressive overlay removal active');
 })();
         `.trim();
     }
@@ -486,10 +594,104 @@ class ConsentNeutralizer {
                     visibility: hidden !important;
                 }
                 
+                /* AGGRESSIVE: Hide ALL modals and dialogs */
+                [role="dialog"],
+                [role="alertdialog"],
+                [aria-modal="true"],
+                .modal,
+                .Modal,
+                .dialog,
+                .Dialog,
+                .popup,
+                .Popup,
+                .overlay,
+                .Overlay,
+                [class*="modal"]:not([class*="modal-content"]):not([class*="modal-body"]),
+                [class*="Modal"]:not([class*="Modal-content"]):not([class*="Modal-body"]),
+                [class*="dialog"]:not([class*="dialog-content"]):not([class*="dialog-body"]),
+                [class*="Dialog"]:not([class*="Dialog-content"]):not([class*="Dialog-body"]),
+                [class*="popup"]:not([class*="popup-content"]):not([class*="popup-body"]),
+                [class*="Popup"]:not([class*="Popup-content"]):not([class*="Popup-body"]),
+                [class*="overlay"]:not([class*="overlay-content"]):not([class*="overlay-body"]),
+                [class*="Overlay"]:not([class*="Overlay-content"]):not([class*="Overlay-body"]) {
+                    display: none !important;
+                    visibility: hidden !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                }
+                
+                /* Chat widgets */
+                [class*="chat"]:not(main):not(article):not([role="main"]),
+                [class*="Chat"]:not(main):not(article):not([role="main"]),
+                [id*="chat"]:not(main):not(article):not([role="main"]),
+                [id*="Chat"]:not(main):not(article):not([role="main"]),
+                [class*="intercom"],
+                [id*="intercom"],
+                [class*="drift"],
+                [id*="drift"],
+                [class*="zendesk"],
+                [id*="zendesk"],
+                iframe[src*="intercom"],
+                iframe[src*="drift"],
+                iframe[src*="zendesk"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                }
+                
+                /* Newsletter/subscription popups */
+                [class*="newsletter"]:not(main):not(article):not([role="main"]),
+                [class*="subscribe"]:not(main):not(article):not([role="main"]),
+                [class*="signup"]:not(main):not(article):not([role="main"]),
+                [id*="newsletter"]:not(main):not(article):not([role="main"]),
+                [id*="subscribe"]:not(main):not(article):not([role="main"]),
+                [id*="signup"]:not(main):not(article):not([role="main"]) {
+                    display: none !important;
+                    visibility: hidden !important;
+                }
+                
+                /* Location/language selectors */
+                [class*="location-selector"],
+                [class*="language-selector"],
+                [class*="region-selector"],
+                [class*="country-selector"],
+                [id*="location-selector"],
+                [id*="language-selector"],
+                [id*="region-selector"],
+                [id*="country-selector"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                }
+                
+                /* Backdrop/underlay elements */
+                .backdrop,
+                .Backdrop,
+                .underlay,
+                .Underlay,
+                [class*="backdrop"],
+                [class*="Backdrop"],
+                [class*="underlay"],
+                [class*="Underlay"],
+                [class*="modal-backdrop"],
+                [class*="dialog-backdrop"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                    opacity: 0 !important;
+                }
+                
+                /* High z-index elements (likely overlays) */
+                *[style*="z-index: 999"],
+                *[style*="z-index: 9999"],
+                *[style*="z-index:999"],
+                *[style*="z-index:9999"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                }
+                
                 /* Restore body scrolling (banners often disable it) */
                 body {
                     overflow: auto !important;
                     position: static !important;
+                    height: auto !important;
                 }
                 
                 html {
@@ -501,14 +703,118 @@ class ConsentNeutralizer {
                 body::after {
                     display: none !important;
                 }
+                
+                /* Remove fixed position elements with high z-index (likely overlays) */
+                *[style*="position: fixed"][style*="z-index"],
+                *[style*="position:fixed"][style*="z-index"] {
+                    display: none !important;
+                }
             `;
 
             await page.addStyleTag({ content: css });
             this.stats.cssApplied = true;
-            this.log('info', 'Layer 4 (CSS Overlay Removal) activated');
+            this.log('info', 'Layer 4 (CSS Overlay Removal) activated - AGGRESSIVE mode');
             return true;
         } catch (error) {
             this.log('error', `Failed to apply overlay CSS: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * LAYER 4B: DOM CLEANUP - Physically remove overlay elements
+     * 
+     * WHY: Some overlays resist CSS hiding. We physically remove them from DOM.
+     */
+    async removeOverlaysFromDOM(page) {
+        try {
+            const removedCount = await page.evaluate(() => {
+                let removed = 0;
+                
+                // Selectors for elements to remove
+                const selectorsToRemove = [
+                    // Cookie/Consent
+                    '#onetrust-consent-sdk',
+                    '#onetrust-banner-sdk',
+                    '#CybotCookiebotDialog',
+                    '#CybotCookiebotDialogBodyUnderlay',
+                    '.qc-cmp2-container',
+                    '[class*="cookie-banner"]',
+                    '[class*="consent-banner"]',
+                    '[id*="cookie-banner"]',
+                    '[id*="consent-banner"]',
+                    
+                    // Modals and dialogs
+                    '[role="dialog"]',
+                    '[role="alertdialog"]',
+                    '[aria-modal="true"]',
+                    
+                    // Chat widgets
+                    '[class*="intercom"]',
+                    '[id*="intercom"]',
+                    '[class*="drift"]',
+                    '[id*="drift"]',
+                    
+                    // Backdrops
+                    '[class*="backdrop"]',
+                    '[class*="Backdrop"]',
+                    '[class*="underlay"]',
+                    '[class*="modal-backdrop"]'
+                ];
+                
+                selectorsToRemove.forEach(selector => {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            // Check if it's actually an overlay (high z-index or fixed position)
+                            const style = window.getComputedStyle(el);
+                            const zIndex = parseInt(style.zIndex) || 0;
+                            const position = style.position;
+                            
+                            if (zIndex > 100 || position === 'fixed' || position === 'absolute') {
+                                el.remove();
+                                removed++;
+                            }
+                        });
+                    } catch (e) {
+                        // Ignore selector errors
+                    }
+                });
+                
+                // Also remove elements with very high z-index
+                const allElements = document.querySelectorAll('*');
+                allElements.forEach(el => {
+                    try {
+                        const style = window.getComputedStyle(el);
+                        const zIndex = parseInt(style.zIndex) || 0;
+                        
+                        // Remove elements with z-index > 9000 (likely overlays)
+                        if (zIndex > 9000) {
+                            el.remove();
+                            removed++;
+                        }
+                    } catch (e) {
+                        // Ignore
+                    }
+                });
+                
+                // Restore body scrolling
+                if (document.body) {
+                    document.body.style.overflow = 'auto';
+                    document.body.style.position = 'static';
+                    document.body.style.height = 'auto';
+                }
+                
+                return removed;
+            });
+            
+            if (removedCount > 0) {
+                this.log('info', `Layer 4B (DOM Cleanup) removed ${removedCount} overlay elements`);
+            }
+            
+            return true;
+        } catch (error) {
+            this.log('error', `Failed to remove overlays from DOM: ${error.message}`);
             return false;
         }
     }
