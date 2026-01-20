@@ -5,6 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Company Dashboard | Villain Branding</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
   <link rel="stylesheet" href="css/styles.css">
   <style>
     .btn-add-page:hover {
@@ -143,6 +145,22 @@
     const addCompanyForm = document.getElementById('addCompanyForm');
     const addBtn = document.getElementById('addBtn');
     let pageInputCount = 1;
+    
+    // Check for ongoing analysis on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      const analysisState = localStorage.getItem('analysisState');
+      if (analysisState) {
+        try {
+          const state = JSON.parse(analysisState);
+          if (state.inProgress) {
+            restoreAnalysisState(state);
+          }
+        } catch (e) {
+          console.error('Failed to restore analysis state:', e);
+          localStorage.removeItem('analysisState');
+        }
+      }
+    });
 
     // Add new page input field
     function addPageInput() {
@@ -283,6 +301,18 @@
           url = websiteUrl || new URL(specificPages[0]).origin;
         }
 
+        // Save analysis state to localStorage
+        const analysisState = {
+          inProgress: true,
+          url: url,
+          mode: mode,
+          pages: pages,
+          progress: 0,
+          message: 'Initializing...',
+          logs: []
+        };
+        localStorage.setItem('analysisState', JSON.stringify(analysisState));
+
         // Start Streaming Analysis
         window.api.analyzeStream(
           url,
@@ -292,19 +322,27 @@
           (data) => {
             if (data.message) {
               appendLog(data.message);
+              analysisState.logs.push(data.message);
+              analysisState.message = data.message;
               // Update status text
               statusText.querySelector('span:first-child').textContent = data.message;
             }
             if (data.progress !== undefined && data.progress !== null) {
               progressFill.style.width = `${data.progress}%`;
               statusText.querySelector('span:last-child').textContent = `${data.progress}%`;
+              analysisState.progress = data.progress;
             }
+            // Update localStorage with latest state
+            localStorage.setItem('analysisState', JSON.stringify(analysisState));
           },
           // onComplete
           (result) => {
             progressFill.style.width = '100%';
             statusText.querySelector('span:last-child').textContent = '100%';
             appendLog('Analysis complete! Redirecting...');
+            
+            // Clear analysis state from localStorage
+            localStorage.removeItem('analysisState');
 
             setTimeout(() => {
               if (result.success) {
@@ -322,6 +360,9 @@
             statusText.querySelector('span:first-child').textContent = 'Failed';
             statusText.querySelector('span:first-child').style.color = '#ef4444';
             alert(`Analysis failed: ${error.message}`);
+            
+            // Clear analysis state from localStorage on error
+            localStorage.removeItem('analysisState');
             resetUI();
           }
         );
@@ -329,6 +370,7 @@
       } catch (error) {
         console.error('Error:', error);
         alert('An error occurred during analysis setup.');
+        localStorage.removeItem('analysisState');
         resetUI();
       }
 
@@ -338,6 +380,123 @@
         addBtn.style.opacity = '1';
       }
     });
+
+    // Function to restore analysis state when returning to the page
+    function restoreAnalysisState(state) {
+      // Disable form and button
+      addBtn.disabled = true;
+      addBtn.innerHTML = 'ANALYZING... <span class="spinner-small"></span>';
+      addBtn.style.opacity = '0.7';
+
+      // Create progress UI - start fresh, don't show stale data
+      const progressContainer = document.createElement('div');
+      progressContainer.id = 'analysisProgress';
+      progressContainer.style.cssText = 'margin-top: 1rem; padding: 1rem; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px solid var(--border);';
+
+      const progressBar = document.createElement('div');
+      progressBar.style.cssText = 'width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-bottom: 0.5rem; overflow: hidden;';
+      const progressFill = document.createElement('div');
+      // Start at 0% - will be updated by server immediately
+      progressFill.style.cssText = 'width: 0%; height: 100%; background: var(--accent); transition: width 0.3s ease;';
+      progressBar.appendChild(progressFill);
+
+      const statusText = document.createElement('div');
+      statusText.style.cssText = 'font-size: 0.9rem; color: var(--text-primary); margin-bottom: 0.5rem; display: flex; justify-content: space-between;';
+      // Show reconnecting message instead of stale data
+      statusText.innerHTML = '<span>Reconnecting to analysis...</span><span>--</span>';
+
+      const logContainer = document.createElement('div');
+      logContainer.style.cssText = 'font-family: monospace; font-size: 0.8rem; color: var(--text-secondary); max-height: 150px; overflow-y: auto; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px;';
+
+      // Show reconnection message instead of old logs
+      const reconnectLine = document.createElement('div');
+      reconnectLine.textContent = '> Reconnecting to ongoing analysis...';
+      reconnectLine.style.marginBottom = '2px';
+      reconnectLine.style.color = '#eab308'; // Yellow color for reconnecting
+      logContainer.appendChild(reconnectLine);
+
+      // Remove existing progress if any
+      const existingProgress = document.getElementById('analysisProgress');
+      if (existingProgress) existingProgress.remove();
+
+      // Insert after form
+      addCompanyForm.parentNode.insertBefore(progressContainer, addCompanyForm.nextSibling);
+      progressContainer.appendChild(statusText);
+      progressContainer.appendChild(progressBar);
+      progressContainer.appendChild(logContainer);
+
+      // Helper to append log
+      const appendLog = (message) => {
+        const line = document.createElement('div');
+        line.textContent = `> ${message}`;
+        line.style.marginBottom = '2px';
+        logContainer.appendChild(line);
+        logContainer.scrollTop = logContainer.scrollHeight;
+      };
+
+      // Reset state to track fresh data from server
+      state.logs = [];
+      state.progress = 0;
+
+      // Continue streaming - server will send current actual progress
+      window.api.analyzeStream(
+        state.url,
+        state.pages || [],
+        state.mode,
+        // onProgress
+        (data) => {
+          if (data.message) {
+            appendLog(data.message);
+            state.logs.push(data.message);
+            state.message = data.message;
+            statusText.querySelector('span:first-child').textContent = data.message;
+          }
+          if (data.progress !== undefined && data.progress !== null) {
+            progressFill.style.width = `${data.progress}%`;
+            statusText.querySelector('span:last-child').textContent = `${data.progress}%`;
+            state.progress = data.progress;
+          }
+          // Update localStorage with latest state
+          localStorage.setItem('analysisState', JSON.stringify(state));
+        },
+        // onComplete
+        (result) => {
+          progressFill.style.width = '100%';
+          statusText.querySelector('span:last-child').textContent = '100%';
+          appendLog('Analysis complete! Redirecting...');
+          
+          // Clear analysis state from localStorage
+          localStorage.removeItem('analysisState');
+
+          setTimeout(() => {
+            if (result.success) {
+              window.location.href = `company.html?id=${result.companyId}`;
+            } else {
+              alert('Analysis failed: ' + (result.error || 'Unknown error'));
+              resetUI();
+            }
+          }, 1000);
+        },
+        // onError
+        (error) => {
+          console.error('Stream error:', error);
+          appendLog(`Error: ${error.message}`);
+          statusText.querySelector('span:first-child').textContent = 'Failed';
+          statusText.querySelector('span:first-child').style.color = '#ef4444';
+          alert(`Analysis failed: ${error.message}`);
+          
+          // Clear analysis state from localStorage on error
+          localStorage.removeItem('analysisState');
+          resetUI();
+        }
+      );
+
+      function resetUI() {
+        addBtn.disabled = false;
+        addBtn.textContent = 'START ANALYSIS';
+        addBtn.style.opacity = '1';
+      }
+    }
   </script>
 </body>
 
