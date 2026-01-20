@@ -345,10 +345,8 @@ class ConsentNeutralizer {
         hideOverlays();
     }
     
-    // Watch for dynamically added overlays - check every 500ms
-    setInterval(hideOverlays, 500);
-    
-    // Also watch with MutationObserver for immediate response
+    // Watch for dynamically added overlays - use MutationObserver only (no polling)
+    // This is more efficient and doesn't cause memory leaks
     const observer = new MutationObserver(hideOverlays);
     if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });
@@ -359,6 +357,12 @@ class ConsentNeutralizer {
             }
         });
     }
+    
+    // Run hideOverlays a few more times with delays (instead of infinite polling)
+    // This catches overlays that appear after initial load
+    setTimeout(hideOverlays, 1000);
+    setTimeout(hideOverlays, 2000);
+    setTimeout(hideOverlays, 3000);
     
     // ============================================================
     // Restore Body Scrolling
@@ -375,7 +379,11 @@ class ConsentNeutralizer {
         }
     };
     
-    setInterval(restoreScrolling, 500);
+    // Restore scrolling immediately and a few times after (no infinite polling)
+    restoreScrolling();
+    setTimeout(restoreScrolling, 1000);
+    setTimeout(restoreScrolling, 2000);
+    setTimeout(restoreScrolling, 3000);
     
     console.log('[CMP Neutralizer] All consent APIs neutralized + aggressive overlay removal active');
 })();

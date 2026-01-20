@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Analyzed Companies | Villain Branding</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="css/styles.css">
     <style>
         .company-card {
@@ -66,7 +68,7 @@
 
         /* Scrollable Companies Container */
         .scrollable-companies-container {
-            margin-top: 15rem;
+            margin-top: 20rem;
             padding-bottom: 4rem;
         }
 
@@ -107,10 +109,23 @@
 
     <!-- Fixed Heading -->
     <div class="fixed-heading-container">
-        <h1 class="hero-title fixed-heading">
-            <span>ANALYZED</span>
-            <span>COMPANIES</span>
-        </h1>
+        <div style="max-width: var(--container-width); width: 100%; padding: 0 2rem;">
+            <h1 class="hero-title fixed-heading">
+                <span>ANALYZED</span>
+                <span>COMPANIES</span>
+            </h1>
+            
+            <!-- Search Bar -->
+            <div style="margin-top: 2rem;">
+                <input 
+                    type="text" 
+                    id="companySearchInput" 
+                    class="search-input" 
+                    placeholder="Search companies by name or URL..."
+                    style="width: 100%; padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text-primary); font-size: 0.95rem; transition: var(--transition);"
+                />
+            </div>
+        </div>
     </div>
 
     <!-- Scrollable Companies List -->
@@ -125,10 +140,19 @@
     <script src="js/app.js"></script>
     <script>
         const companiesGrid = document.getElementById('companiesGrid');
+        let allCompanies = []; // Store all companies for search
+        let searchQuery = ''; // Search filter
+
+        // Setup search functionality
+        document.getElementById('companySearchInput').addEventListener('input', (e) => {
+            searchQuery = e.target.value.toLowerCase().trim();
+            renderCompanies(allCompanies);
+        });
 
         async function loadCompanies() {
             try {
                 const companies = await window.api.getCompanies();
+                allCompanies = companies; // Store for search
                 renderCompanies(companies);
             } catch (error) {
                 console.error('Failed to load companies:', error);
@@ -146,7 +170,26 @@
                 return;
             }
 
-            companiesGrid.innerHTML = companies.map(company => {
+            // Filter companies based on search query
+            let filteredCompanies = companies;
+            if (searchQuery) {
+                filteredCompanies = companies.filter(company => {
+                    const name = (company.name || company.domain || '').toLowerCase();
+                    const url = (company.url || '').toLowerCase();
+                    return name.includes(searchQuery) || url.includes(searchQuery);
+                });
+            }
+
+            if (filteredCompanies.length === 0) {
+                companiesGrid.innerHTML = `
+          <div class="message-card text-center" style="padding: 4rem;">
+            <p class="text-muted">No companies match your search query "${searchQuery}".</p>
+          </div>
+        `;
+                return;
+            }
+
+            companiesGrid.innerHTML = filteredCompanies.map(company => {
               const analysisMode = company.analysis_mode || 'full_website';
               const pagesCount = company.pages_analyzed;
               const isFullWebsite = analysisMode === 'full_website';

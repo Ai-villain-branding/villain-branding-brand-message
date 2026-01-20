@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- Outer circle border -->
+  <circle cx="500" cy="500" r="480" fill="none" stroke="#9d3a5e" stroke-width="20"/>
+  <!-- Inner white circle -->
+  <circle cx="500" cy="500" r="450" fill="none" stroke="#f5f5f5" stroke-width="15"/>
+  <!-- Background circle -->
+  <circle cx="500" cy="500" r="430" fill="#9d3a5e"/>
+  
+  <!-- Letter V -->
+  <path d="M 270 370 L 380 750 L 450 750 L 560 370" 
+        fill="none" stroke="#f5f5f5" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Comma/apostrophe -->
+  <ellipse cx="680" cy="380" rx="60" ry="60" fill="#f5f5f5"/>
+  <path d="M 680 440 Q 650 520 620 580" 
+        fill="none" stroke="#f5f5f5" stroke-width="50" stroke-linecap="round"/>
+</svg>

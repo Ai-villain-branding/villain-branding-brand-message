@@ -35,15 +35,38 @@ const config = require('./config');
 const googleDriveService = require('./services/googleDrive');
 const { saveHtmlEvidence, getHtmlEvidence } = require('./storage');
 const { categorizeMessages } = require('./services/messageCategorizer');
+const CleanupUtil = require('./services/cleanupUtil');
 
 const app = express();
 const PORT = config.port || 3000;
+
+// Global error handlers for unhandled rejections and exceptions
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise);
+    console.error('❌ Reason:', reason);
+    // In production, you might want to log to a monitoring service
+    // but don't exit the process - let it continue serving other requests
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught Exception:', error);
+    console.error('❌ Stack:', error.stack);
+    // For uncaught exceptions, we should exit gracefully
+    // as the process state may be corrupted
+    console.error('⚠️  Process will exit due to uncaught exception');
+    process.exit(1);
+});
+
+// Start periodic cleanup of temporary directories
+// Runs every hour, removes directories older than 1 hour
+CleanupUtil.startPeriodicCleanup(60, 60);
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Increase limit for base64 images
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const path = require('path');
 app.use(express.static(path.join(__dirname, '../frontend')));
+app.use(express.static(path.join(__dirname, '../../public'))); // Serve public folder
 
 // --- API Endpoints ---
 

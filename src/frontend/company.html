@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Company Messages | Villain Branding</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="css/styles.css">
     <style>
         html,
@@ -620,10 +622,9 @@
             // Use AI categories if available, otherwise fall back to keyword grouping
             if (categorizedData && categorizedData.categories && categorizedData.categories.length > 0) {
                 // Group by AI categories
-                groupedMessages = categorizedData.categories.map(cat => [
-                    cat.name,
-                    cat.messages || []
-                ]).filter(([name, msgs]) => msgs.length > 0);
+                groupedMessages = categorizedData.categories.map(cat => {
+                    return [cat.name, cat.messages || []];
+                }).filter(([name, msgs]) => msgs.length > 0);
             } else {
                 // Fall back to keyword-based grouping
                 groupedMessages = extractThemes(messages);

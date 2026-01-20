@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Company Evidences | Villain Branding</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="css/styles.css">
     <style>
         /* Fixed Heading Container */
@@ -31,7 +33,7 @@
 
         /* Scrollable Companies Container */
         .scrollable-companies-container {
-            margin-top: 15rem;
+            margin-top: 20rem;
             padding-bottom: 4rem;
         }
 
@@ -76,6 +78,7 @@
             <span>COMPANY</span>
             <span>EVIDENCES</span>
         </h1>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search companies...">
     </div>
 
     <!-- Scrollable Companies List -->
@@ -90,10 +93,15 @@
     <script src="js/app.js"></script>
     <script>
         const companiesGrid = document.getElementById('companiesGrid');
+        const searchInput = document.getElementById('searchInput');
+        
+        let allCompanies = [];
+        let searchQuery = '';
 
         async function loadCompanies() {
             try {
                 const companies = await window.api.getCompaniesWithEvidences();
+                allCompanies = companies;
                 renderCompanies(companies);
             } catch (error) {
                 console.error('Failed to load companies:', error);
@@ -102,16 +110,33 @@
         }
 
         function renderCompanies(companies) {
-            if (!companies || companies.length === 0) {
-                companiesGrid.innerHTML = `
-          <div class="message-card text-center" style="padding: 4rem;">
-            <p class="text-muted">No companies with proofs yet. Go to Messages to generate proofs for a company.</p>
-          </div>
-        `;
+            // Filter companies based on search query
+            const filteredCompanies = companies.filter(company => {
+                if (!searchQuery) return true;
+                const query = searchQuery.toLowerCase();
+                const name = (company.name || company.domain || '').toLowerCase();
+                const url = (company.url || '').toLowerCase();
+                return name.includes(query) || url.includes(query);
+            });
+
+            if (!filteredCompanies || filteredCompanies.length === 0) {
+                if (searchQuery) {
+                    companiesGrid.innerHTML = `
+                        <div class="message-card text-center" style="padding: 4rem;">
+                            <p class="text-muted">No companies found matching "${searchQuery}"</p>
+                        </div>
+                    `;
+                } else {
+                    companiesGrid.innerHTML = `
+                        <div class="message-card text-center" style="padding: 4rem;">
+                            <p class="text-muted">No companies with proofs yet. Go to Messages to generate proofs for a company.</p>
+                        </div>
+                    `;
+                }
                 return;
             }
 
-            companiesGrid.innerHTML = companies.map(company => `
+            companiesGrid.innerHTML = filteredCompanies.map(company => `
         <div class="message-card" onclick="window.location.href='proofs.html?id=${company.id}'" style="display: flex; justify-content: space-between; align-items: center; padding: 3rem;">
           <div>
             <h2 style="font-size: 2.5rem; font-weight: 300; margin-bottom: 0.5rem;">${company.name || company.domain}</h2>
@@ -126,6 +151,12 @@
         </div>
       `).join('');
         }
+
+        // Search input event listener
+        searchInput.addEventListener('input', (e) => {
+            searchQuery = e.target.value.trim();
+            renderCompanies(allCompanies);
+        });
 
         loadCompanies();
     </script>

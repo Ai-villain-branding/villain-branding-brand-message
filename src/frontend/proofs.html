@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Visual Evidences | Villain Branding</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
     <style>
@@ -645,6 +647,8 @@
         const companyName = document.getElementById('companyName');
         const proofsGrid = document.getElementById('proofsGrid');
         let currentCompany = null; // Store company data for use in rendering
+        let allMessages = []; // Store all messages
+        let allEvidences = []; // Store all evidences
 
         // Update Nav Links
         window.api.updateNavLinks(companyId);
@@ -666,9 +670,11 @@
 
                 // Fetch messages with their locations
                 const messages = await window.api.getCompanyMessages(companyId);
+                allMessages = messages; // Store for search
 
                 // Fetch existing screenshots
                 const existingEvidences = await window.api.getScreenshots(companyId);
+                allEvidences = existingEvidences; // Store for search
 
                 // Render all pages from messages with re-capture option
                 renderAllPages(messages, existingEvidences, currentCompany);
