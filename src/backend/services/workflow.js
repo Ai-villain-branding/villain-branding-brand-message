@@ -6,6 +6,7 @@ const supabase = require('./supabase');
 const { v4: uuidv4 } = require('uuid');
 const { categorizeMessages } = require('./messageCategorizer');
 const ScreenshotService = require('./screenshotService');
+const { rateLimiter, generateRandomFingerprint, generateHeaders } = require('./antiDetection');
 
 /**
  * Orchestrates the full analysis workflow for a company
@@ -86,8 +87,26 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null, progressCal
             sendProgress('log', 'Fetching homepage for link analysis...');
             const homepageHtml = await fetchHtml(companyUrl);
 
+            // Debug: Log content length to diagnose blocked pages
+            sendProgress('log', `Homepage content fetched: ${homepageHtml ? homepageHtml.length : 0} characters`);
+
+            // Check if we got meaningful content
+            if (!homepageHtml || homepageHtml.length < 1000) {
+                sendProgress('log', `WARNING: Homepage content seems too short (${homepageHtml ? homepageHtml.length : 0} chars) - page may be blocked`);
+            }
+
             sendProgress('log', 'Analyzing links to discover pages...', 15);
             const linkAnalysisResult = await analyzeLinks(homepageHtml, companyUrl);
+
+            // Debug: Log what links were found
+            const totalLinksFound = Object.values(linkAnalysisResult).flat().length;
+            sendProgress('log', `Link analysis found ${totalLinksFound} links across categories`);
+            if (linkAnalysisResult.about_pages?.length > 0) {
+                sendProgress('log', `  - About pages: ${linkAnalysisResult.about_pages.length}`);
+            }
+            if (linkAnalysisResult.product_pages?.length > 0) {
+                sendProgress('log', `  - Product pages: ${linkAnalysisResult.product_pages.length}`);
+            }
 
             // Determine Pages to Visit (Analyze all pages)
             const pagesToVisit = new Set([companyUrl]); // Always include homepage
@@ -121,9 +140,12 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null, progressCal
                 const html = await fetchHtml(pageUrl);
                 const cleanedContent = cleanContent(html);
 
+                // Debug: Log content sizes
+                sendProgress('log', `  Raw HTML: ${html ? html.length : 0} chars, Cleaned: ${cleanedContent.length} chars`);
+
                 // Skip if content is too short
                 if (cleanedContent.length < 100) {
-                    sendProgress('log', `Skipping ${pageUrl} - content too short`);
+                    sendProgress('log', `Skipping ${pageUrl} - content too short (${cleanedContent.length} chars)`);
                     continue;
                 }
 
@@ -430,16 +452,24 @@ async function runAnalysisWorkflow(companyUrl, specificPages = null, progressCal
         };
 
     } catch (error) {
-        sendProgress('error', `Workflow failed: ${error.message}`);
+        // Provide more helpful error messages for DNS errors
+        let errorMessage = error.message;
+        if (error.code === 'ENOTFOUND' || error.message.includes('ENOTFOUND') || error.message.includes('ERR_NAME_NOT_RESOLVED')) {
+            errorMessage = error.message || `Cannot resolve domain. The domain name may be incorrect or the website may be down.`;
+        }
+        sendProgress('error', `Workflow failed: ${errorMessage}`);
         throw error;
     }
 }
 
-async function fetchHtml(url) {
+async function fetchHtml(url, retryAttempt = 0) {
     const screenshotService = new ScreenshotService(); // Create new instance for each request
+    const maxRetries = 3;
+    const timeout = parseInt(process.env.REQUEST_TIMEOUT_MS) || 30000;
+
     try {
         // Use Playwright for robust fetching (handles dynamic content & anti-bot)
-        console.log(`Fetching HTML for ${url} using Playwright...`);
+        console.log(`Fetching HTML for ${url} using Playwright (Attempt ${retryAttempt + 1}/${maxRetries})...`);
         const content = await screenshotService.fetchPageContent(url);
         if (content && content.length > 0) {
             return content;
@@ -448,22 +478,129 @@ async function fetchHtml(url) {
     } catch (playwrightError) {
         console.warn(`Playwright fetch failed for ${url}, falling back to axios:`, playwrightError.message);
 
-        // Fallback to axios with browser-like headers
+        // Check for DNS errors early (before trying axios)
+        const isDnsError = playwrightError.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                          playwrightError.message.includes('net::ERR_NAME_NOT_RESOLVED');
+
+        if (isDnsError) {
+            // Extract domain from URL for better error message
+            let domain = url;
+            try {
+                const urlObj = new URL(url);
+                domain = urlObj.hostname;
+            } catch (e) {
+                // If URL parsing fails, use the original URL
+            }
+
+            // Suggest common typo fixes
+            let suggestion = '';
+            if (domain.includes('bluesheild')) {
+                suggestion = ' Did you mean "blueshield" (with an "i")?';
+            } else if (domain.includes('blueshield') && !domain.includes('bluecross')) {
+                suggestion = ' Did you mean "bluecrossblueshield.com"?';
+            }
+
+            const errorMessage = `Cannot resolve domain "${domain}". The domain name may be incorrect or the website may be down.${suggestion}`;
+            const dnsError = new Error(errorMessage);
+            dnsError.code = 'ENOTFOUND';
+            dnsError.originalError = playwrightError;
+            throw dnsError;
+        }
+
+        // Check if it's an HTTP/2 error that we should retry with different approach
+        const isHttp2Error = playwrightError.message.includes('ERR_HTTP2_') ||
+            playwrightError.message.includes('PROTOCOL_ERROR');
+
+        // Fallback to axios with randomized browser-like headers
         try {
+            const https = require('https');
+            const http = require('http');
+
+            // Apply rate limiting
+            await rateLimiter.wait(url);
+
+            // Generate random fingerprint for axios request
+            const fingerprint = generateRandomFingerprint();
+            const headers = generateHeaders(fingerprint);
+            headers['User-Agent'] = fingerprint.userAgent;
+            headers['Connection'] = 'keep-alive';
+
+            // Create agents that force HTTP/1.1 (disable HTTP/2)
+            const httpsAgent = new https.Agent({
+                keepAlive: true,
+                maxVersion: 'TLSv1.3',
+                minVersion: 'TLSv1.2',
+                // These settings help with some anti-bot measures
+                rejectUnauthorized: true,
+                timeout: timeout
+            });
+
+            const httpAgent = new http.Agent({
+                keepAlive: true,
+                timeout: timeout
+            });
+
             const response = await axios.get(url, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache'
-                },
-                timeout: 15000
+                headers: headers,
+                timeout: timeout,
+                httpsAgent: httpsAgent,
+                httpAgent: httpAgent,
+                maxRedirects: 10,
+                validateStatus: (status) => status >= 200 && status < 400 // Accept redirects
             });
             return response.data;
         } catch (axiosError) {
             console.error(`Failed to fetch ${url} with axios:`, axiosError.message);
-            throw axiosError; // Throw original error if both fail
+
+            // Check for DNS resolution errors (domain doesn't exist)
+            const isDnsError = axiosError.code === 'ENOTFOUND' || 
+                              axiosError.message.includes('ENOTFOUND') ||
+                              axiosError.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                              playwrightError.message.includes('ERR_NAME_NOT_RESOLVED');
+
+            if (isDnsError) {
+                // Extract domain from URL for better error message
+                let domain = url;
+                try {
+                    const urlObj = new URL(url);
+                    domain = urlObj.hostname;
+                } catch (e) {
+                    // If URL parsing fails, use the original URL
+                }
+
+                // Suggest common typo fixes
+                let suggestion = '';
+                if (domain.includes('bluesheild')) {
+                    suggestion = ' Did you mean "blueshield" (with an "i")?';
+                } else if (domain.includes('blueshield') && !domain.includes('bluecross')) {
+                    suggestion = ' Did you mean "bluecrossblueshield.com"?';
+                }
+
+                const errorMessage = `Cannot resolve domain "${domain}". The domain name may be incorrect or the website may be down.${suggestion}`;
+                const dnsError = new Error(errorMessage);
+                dnsError.code = 'ENOTFOUND';
+                dnsError.originalError = axiosError;
+                throw dnsError;
+            }
+
+            // If we haven't exhausted retries and it's a retriable error, try again
+            if (retryAttempt < maxRetries - 1) {
+                const isRetriableError =
+                    axiosError.code === 'ECONNABORTED' ||
+                    axiosError.code === 'ETIMEDOUT' ||
+                    axiosError.code === 'ECONNRESET' ||
+                    axiosError.message.includes('timeout') ||
+                    axiosError.message.includes('PROTOCOL_ERROR') ||
+                    isHttp2Error;
+
+                if (isRetriableError) {
+                    console.log(`Retrying fetch for ${url} (Attempt ${retryAttempt + 2}/${maxRetries})...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * (retryAttempt + 1))); // Exponential backoff
+                    return fetchHtml(url, retryAttempt + 1);
+                }
+            }
+
+            throw axiosError; // Throw error if all retries failed
         }
     } finally {
         // Ensure browser is closed to prevent resource leaks
